@@ -1,0 +1,2087 @@
+﻿using System.Collections.Generic;
+using UnityEditor;
+using UnityEngine;
+
+public class MapToolWindow : EditorWindow
+{
+    private const string RootObjectName = "MapRoot";
+
+    private enum NeighborSnapMode
+    {
+        Face,
+        FaceExact,
+        Edge,
+        Vertex
+    }
+
+    private GameObject selectedPrefab;
+    private GameObject floorPrefab;
+    private GameObject wallPrefab;
+    private GameObject stairPrefab;
+    private Material selectedMaterial;
+    private Transform placementParent;
+
+    private float gridSize = 1.0f;
+    private float heightStep = 1.0f;
+    private float neighborSnapDistance = 0.5f;
+    private float neighborAngleSnapThreshold = 10.0f;
+    private float faceAssistSnapDistance = 0.2f;
+    private int heightLevel;
+    private float currentRotationDegrees;
+    private bool placementEnabled = true;
+    private bool showGrid = true;
+    private bool snapToSurface = true;
+    private bool snapToGrid = true;
+    private bool snapToNeighbor;
+    private bool topSurfaceOnly = true;
+    private bool alignToSurfaceNormal;
+    private bool autoAlignToNeighbor = true;
+    private bool showMeshColliderBounds;
+    private NeighborSnapMode neighborSnapMode = NeighborSnapMode.Face;
+    private int previewGridRadius = 12;
+    private Vector2 lastMousePosition;
+    private bool lastPreviewOccupied;
+    private bool isDragPlacing;
+    private GameObject previewInstance;
+    private Material previewMaterial;
+    private Vector3 lastDragPlacementPosition;
+    private Collider lastSurfaceHitCollider;
+    private Vector3 lastSurfaceHitPoint;
+    private Vector3 lastSurfaceNormal = Vector3.up;
+    private Vector3 lastPreviewPosition;
+    private Quaternion lastPreviewRotation = Quaternion.identity;
+    private bool lastUsedNeighborSnap;
+    private string lastHitColliderName = "?놁쓬";
+
+    private readonly List<GameObject> recentPlacements = new();
+
+    [MenuItem("Tools/Umbrella/Map Tool")]
+    public static void OpenWindow()
+    {
+        GetWindow<MapToolWindow>("Map Tool");
+    }
+
+    private void OnEnable()
+    {
+        SceneView.duringSceneGui += OnSceneGUI;
+        EditorApplication.update += UpdatePreviewState;
+    }
+
+    private void OnDisable()
+    {
+        SceneView.duringSceneGui -= OnSceneGUI;
+        EditorApplication.update -= UpdatePreviewState;
+        DestroyPreviewInstance();
+    }
+
+    private void OnGUI()
+    {
+        EditorGUILayout.LabelField("?꾨━???꾨━??, EditorStyles.boldLabel);
+        floorPrefab = (GameObject)EditorGUILayout.ObjectField(
+            new GUIContent("Floor", "?먯＜ ?ъ슜??諛붾떏 Floor prefab??誘몃━ ?깅줉?⑸땲??"),
+            floorPrefab,
+            typeof(GameObject),
+            false
+        );
+        wallPrefab = (GameObject)EditorGUILayout.ObjectField(
+            new GUIContent("Wall", "?먯＜ ?ъ슜??踰?Wall prefab??誘몃━ ?깅줉?⑸땲??"),
+            wallPrefab,
+            typeof(GameObject),
+            false
+        );
+        stairPrefab = (GameObject)EditorGUILayout.ObjectField(
+            new GUIContent("Stair", "?먯＜ ?ъ슜??怨꾨떒 Stair prefab??誘몃━ ?깅줉?⑸땲??"),
+            stairPrefab,
+            typeof(GameObject),
+            false
+        );
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            GUI.enabled = floorPrefab != null;
+            if (GUILayout.Button("Use Floor"))
+            {
+                SetSelectedPrefab(floorPrefab);
+            }
+
+            GUI.enabled = wallPrefab != null;
+            if (GUILayout.Button("Use Wall"))
+            {
+                SetSelectedPrefab(wallPrefab);
+            }
+
+            GUI.enabled = stairPrefab != null;
+            if (GUILayout.Button("Use Stair"))
+            {
+                SetSelectedPrefab(stairPrefab);
+            }
+
+            GUI.enabled = true;
+        }
+
+        EditorGUILayout.Space(6.0f);
+        EditorGUILayout.LabelField("諛곗튂", EditorStyles.boldLabel);
+        EditorGUI.BeginChangeCheck();
+        GameObject prefabFieldValue = (GameObject)EditorGUILayout.ObjectField(
+            new GUIContent("Prefab", "?꾩옱 諛곗튂??prefab?낅땲??"),
+            selectedPrefab,
+            typeof(GameObject),
+            false
+        );
+        if (EditorGUI.EndChangeCheck())
+        {
+            SetSelectedPrefab(prefabFieldValue);
+        }
+
+        selectedMaterial = (Material)EditorGUILayout.ObjectField(
+            new GUIContent("Material Preset", "?좏깮???ㅻ툕?앺듃?ㅼ뿉 ?쇨큵 ?곸슜??material preset?낅땲??"),
+            selectedMaterial,
+            typeof(Material),
+            false
+        );
+
+        placementParent = (Transform)EditorGUILayout.ObjectField(
+            new GUIContent("Parent", "諛곗튂???ㅻ툕?앺듃瑜??ｌ뼱??遺紐?Transform?낅땲?? 鍮꾩썙?먮㈃ MapRoot瑜??먮룞 ?앹꽦?⑸땲??"),
+            placementParent,
+            typeof(Transform),
+            true
+        );
+
+        gridSize = Mathf.Max(0.1f, EditorGUILayout.FloatField(new GUIContent("Grid Size", "諛곗튂 ?꾩튂瑜?留욎텧 grid ??移몄쓽 ?ш린?낅땲??"), gridSize));
+        heightStep = Mathf.Max(0.1f, EditorGUILayout.FloatField(new GUIContent("Height Step", "Height Level??1 利앷??????щ씪媛???믪씠?낅땲??"), heightStep));
+        heightLevel = EditorGUILayout.IntField(new GUIContent("Height Level", "?꾩옱 諛곗튂 ?믪씠 ?④퀎?낅땲?? [ ? ] ?ㅻ줈??議곗젅?????덉뒿?덈떎."), heightLevel);
+        snapToSurface = EditorGUILayout.Toggle(new GUIContent("Snap To Surface", "?대┃??collider ?쒕㈃??prefab 諛붾떏硫댁씠 留욌떯?꾨줉 諛곗튂?⑸땲??"), snapToSurface);
+        topSurfaceOnly = EditorGUILayout.Toggle(new GUIContent("Top Surface Only", "?꾩そ???ν븳 硫대쭔 諛곗튂 surface濡??ъ슜?⑸땲?? ?녿㈃??留욎븘???뺤? ?딄쾶 ????耳?땲??"), topSurfaceOnly);
+        alignToSurfaceNormal = EditorGUILayout.Toggle(new GUIContent("Align To Surface Normal", "surface normal 諛⑺뼢?쇰줈 prefab??湲곗슱?낅땲?? ?꾨㈃ ?뚯쟾? ?붾뱶 湲곗??쇰줈 ?좎??⑸땲??"), alignToSurfaceNormal);
+        snapToGrid = EditorGUILayout.Toggle(new GUIContent("Snap To Grid", "諛곗튂 ?꾩튂??X/Z 醫뚰몴瑜?grid??留욎떠 ?뺣젹?⑸땲??"), snapToGrid);
+        snapToNeighbor = EditorGUILayout.Toggle(new GUIContent("Snap To Neighbor", "二쇰? collider ?녿㈃??媛源뚯썙吏硫???遺숇룄濡??ㅻ깄?⑸땲??"), snapToNeighbor);
+        neighborSnapMode = (NeighborSnapMode)EditorGUILayout.EnumPopup(
+            new GUIContent("Neighbor Snap Mode", "Face????硫댁뿉, Edge????異뺤뿉, Vertex??瑗?쭞??湲곗??쇰줈 遺숈엯?덈떎."),
+            neighborSnapMode
+        );
+        neighborSnapDistance = Mathf.Max(
+            0.01f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Neighbor Snap Distance", "二쇰? ?ㅻ툕?앺듃? ?쇰쭏??媛源뚯슦硫?snap?좎? ?뺥빀?덈떎. Alt瑜??꾨Ⅴ硫?neighbor snap???꾩떆濡?耳????덉뒿?덈떎."),
+                neighborSnapDistance
+            )
+        );
+        autoAlignToNeighbor = EditorGUILayout.Toggle(
+            new GUIContent("Auto Align To Neighbor", "Face snap 以?二쇰? ?ㅻ툕?앺듃? 媛곷룄 李⑥씠媛 ?묒쑝硫??뚯쟾???먮룞?쇰줈 留욎땅?덈떎."),
+            autoAlignToNeighbor
+        );
+        neighborAngleSnapThreshold = Mathf.Clamp(
+            EditorGUILayout.FloatField(
+                new GUIContent("Neighbor Angle Threshold", "?먮룞 ?뚯쟾???곸슜??理쒕? angle 李⑥씠?낅땲?? ??媛??댄븯硫?neighbor ?뚯쟾??留욎떠 ?뺣젹?⑸땲??"),
+                neighborAngleSnapThreshold
+            ),
+            0.0f,
+            45.0f
+        );
+        faceAssistSnapDistance = Mathf.Max(
+            0.0f,
+            EditorGUILayout.FloatField(
+                new GUIContent("Face Assist Distance", "Face媛 遺숈? ??edge / vertex???댁쭩 ?뺣젹?댁꽌 ???먯뿰?ㅻ읇寃?遺숇룄濡?蹂댁젙?⑸땲??"),
+                faceAssistSnapDistance
+            )
+        );
+
+        EditorGUILayout.Space(4.0f);
+        EditorGUILayout.LabelField("鍮좊Ⅸ 議곗옉", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            "Scene 酉?議곗옉:\n" +
+            "- 醫뚰겢由? ?꾨━??諛곗튂\n" +
+            "- Shift + ?쒕옒洹? ?곗냽 諛곗튂\n" +
+            "- Ctrl + 醫뚰겢由? 而ㅼ꽌 ?꾨옒 ?ㅻ툕?앺듃 ??젣\n" +
+            "- Q / E: 1???뚯쟾\n" +
+            "- R: 90???뚯쟾\n" +
+            "- Delete: ?좏깮 ?ㅻ툕?앺듃 ??젣\n" +
+            "- [ / ]: ?믪씠 ?④퀎 議곗젅\n" +
+            "- Alt: 二쇰? ?ㅻ툕?앺듃 遺숈씠湲??꾩떆 ?쒖꽦??,
+            MessageType.Info
+        );
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("Rotate Left"))
+            {
+                RotateLeft();
+            }
+
+            if (GUILayout.Button("Rotate Right"))
+            {
+                RotateRight();
+            }
+        }
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            if (GUILayout.Button("Height -"))
+            {
+                heightLevel--;
+                Repaint();
+            }
+
+            if (GUILayout.Button("Height +"))
+            {
+                heightLevel++;
+                Repaint();
+            }
+        }
+
+        placementEnabled = EditorGUILayout.Toggle(new GUIContent("Enable Placement", "?꾨㈃ Scene 酉곗뿉??preview? 諛곗튂媛 硫덉땅?덈떎."), placementEnabled);
+        showGrid = EditorGUILayout.Toggle(new GUIContent("Show Grid Preview", "筌띾뜆???域뱀눘荑??grid line???? 揶쏅벡?쒐몴???뽯뻻??몃빍??"), showGrid);
+        showMeshColliderBounds = EditorGUILayout.Toggle(new GUIContent("Show MeshCollider Bounds", "SceneView??MeshCollider bounds??wireframe??곗쨮 ??뽯뻻??몃빍??"), showMeshColliderBounds);
+        previewGridRadius = Mathf.Max(1, EditorGUILayout.IntField(new GUIContent("Grid Preview Radius", "留덉슦??二쇰??쇰줈 紐?移멸퉴吏 grid line??洹몃┫吏 ?뺥빀?덈떎."), previewGridRadius));
+
+        EditorGUILayout.Space(6.0f);
+        EditorGUILayout.LabelField("?묒뾽", EditorStyles.boldLabel);
+
+        if (GUILayout.Button("Apply Material To Selection"))
+        {
+            ApplyMaterialToSelection();
+        }
+
+        if (GUILayout.Button("Snap Selection To Grid"))
+        {
+            SnapSelectionToGrid();
+        }
+
+        if (GUILayout.Button("Add MeshCollider To Selection"))
+        {
+            AddMeshCollidersToSelection();
+        }
+
+        if (GUILayout.Button("Clear Recent Placement Cache"))
+        {
+            recentPlacements.Clear();
+        }
+
+        EditorGUILayout.Space(6.0f);
+        EditorGUILayout.LabelField("?곹깭", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Height Offset", GetCurrentHeight().ToString("F2"));
+        EditorGUILayout.LabelField("Current Rotation", $"{currentRotationDegrees:F1}째");
+        EditorGUILayout.LabelField("Preview Occupied", lastPreviewOccupied ? "?ъ슜 以? : "鍮꾩뼱 ?덉쓬");
+        EditorGUILayout.LabelField("Current Hit Collider", lastHitColliderName);
+        EditorGUILayout.LabelField("Recent Placements", recentPlacements.Count.ToString());
+    }
+
+    private void OnSceneGUI(SceneView sceneView)
+    {
+        if (!placementEnabled)
+        {
+            UpdatePreviewVisibility(false);
+            return;
+        }
+
+        Event currentEvent = Event.current;
+
+        if (currentEvent.type == EventType.MouseMove)
+        {
+            lastMousePosition = currentEvent.mousePosition;
+            sceneView.Repaint();
+        }
+
+        DrawPlacementPreview(currentEvent);
+        if (showMeshColliderBounds)
+        {
+            DrawMeshColliderBounds();
+        }
+        HandleShortcuts(currentEvent);
+
+        bool isPlaceInput = currentEvent.button == 0 && !currentEvent.alt;
+
+        if (currentEvent.type == EventType.MouseDown &&
+            isPlaceInput)
+        {
+            if (currentEvent.control)
+            {
+                TryDeleteUnderCursor(currentEvent.mousePosition);
+            }
+            else
+            {
+                TryPlacePrefab(currentEvent.mousePosition);
+
+                if (currentEvent.shift)
+                {
+                    isDragPlacing = true;
+                    lastDragPlacementPosition = Vector3.positiveInfinity;
+                }
+            }
+
+            currentEvent.Use();
+        }
+
+        if (currentEvent.type == EventType.MouseDrag &&
+            isPlaceInput &&
+            currentEvent.shift &&
+            !currentEvent.control &&
+            isDragPlacing)
+        {
+            TryPlacePrefab(currentEvent.mousePosition, true);
+            currentEvent.Use();
+        }
+
+        if (currentEvent.type == EventType.MouseUp && currentEvent.button == 0)
+        {
+            isDragPlacing = false;
+        }
+    }
+
+    private void HandleShortcuts(Event currentEvent)
+    {
+        if (currentEvent.type != EventType.KeyDown)
+        {
+            return;
+        }
+
+        if (currentEvent.keyCode == KeyCode.R)
+        {
+            RotateRight();
+            currentEvent.Use();
+        }
+        else if (currentEvent.keyCode == KeyCode.Q)
+        {
+            RotateFineLeft();
+            currentEvent.Use();
+        }
+        else if (currentEvent.keyCode == KeyCode.E)
+        {
+            RotateFineRight();
+            currentEvent.Use();
+        }
+        else if (currentEvent.keyCode == KeyCode.LeftBracket)
+        {
+            heightLevel--;
+            Repaint();
+            currentEvent.Use();
+        }
+        else if (currentEvent.keyCode == KeyCode.RightBracket)
+        {
+            heightLevel++;
+            Repaint();
+            currentEvent.Use();
+        }
+        else if (currentEvent.keyCode == KeyCode.Delete || currentEvent.keyCode == KeyCode.Backspace)
+        {
+            DeleteSelectedObjects();
+            currentEvent.Use();
+        }
+    }
+
+    private void RotateLeft()
+    {
+        currentRotationDegrees = Mathf.Repeat(currentRotationDegrees - 90.0f, 360.0f);
+        Repaint();
+    }
+
+    private void RotateRight()
+    {
+        currentRotationDegrees = Mathf.Repeat(currentRotationDegrees + 90.0f, 360.0f);
+        Repaint();
+    }
+
+    private void RotateFineLeft()
+    {
+        currentRotationDegrees = Mathf.Repeat(currentRotationDegrees - 1.0f, 360.0f);
+        Repaint();
+    }
+
+    private void RotateFineRight()
+    {
+        currentRotationDegrees = Mathf.Repeat(currentRotationDegrees + 1.0f, 360.0f);
+        Repaint();
+    }
+
+    private void DrawPlacementPreview(Event currentEvent)
+    {
+        if (selectedPrefab == null)
+        {
+            UpdatePreviewVisibility(false);
+            return;
+        }
+
+        Vector2 previewMousePosition = currentEvent.mousePosition;
+
+        if (currentEvent.type == EventType.Repaint || currentEvent.type == EventType.Layout)
+        {
+            previewMousePosition = lastMousePosition;
+        }
+        else
+        {
+            lastMousePosition = currentEvent.mousePosition;
+        }
+
+        if (!TryGetPlacementPosition(previewMousePosition, out Vector3 surfacePosition, out Vector3 surfaceNormal))
+        {
+            lastPreviewOccupied = false;
+            lastHitColliderName = "?놁쓬";
+            lastUsedNeighborSnap = false;
+            UpdatePreviewVisibility(false);
+            return;
+        }
+
+        Quaternion placementRotation = GetPlacementRotation(surfaceNormal);
+        bool useNeighborSnap = snapToNeighbor || currentEvent.alt;
+        Vector3 snappedPosition = GetAlignedPreviewPosition(surfacePosition, placementRotation, surfaceNormal);
+        if (useNeighborSnap)
+        {
+            GetNeighborSnappedTransform(snappedPosition, placementRotation, out snappedPosition, out placementRotation);
+        }
+
+        lastPreviewOccupied = IsCellOccupied(snappedPosition);
+
+        UpdatePreviewTransform(snappedPosition, placementRotation);
+        UpdatePreviewMaterial(lastPreviewOccupied);
+        lastPreviewPosition = snappedPosition;
+        lastPreviewRotation = placementRotation;
+        lastUsedNeighborSnap = useNeighborSnap;
+
+        if (showGrid)
+        {
+            DrawGrid(snappedPosition, placementRotation);
+        }
+
+        Handles.color = lastPreviewOccupied
+            ? new Color(1.0f, 0.35f, 0.35f, 0.9f)
+            : new Color(0.2f, 0.9f, 1.0f, 0.9f);
+        Handles.Label(
+            snappedPosition + Vector3.up * 0.25f,
+            lastPreviewOccupied
+                ? $"{selectedPrefab.name} (Occupied)\nHit: {lastHitColliderName}"
+                : $"{selectedPrefab.name}\nHit: {lastHitColliderName}"
+        );
+    }
+
+    private void DrawGrid(Vector3 centerPosition, Quaternion placementRotation)
+    {
+        Vector3 rightAxis = placementRotation * Vector3.right;
+        Vector3 forwardAxis = placementRotation * Vector3.forward;
+        int radius = previewGridRadius;
+        float extent = radius * gridSize;
+
+        Handles.color = new Color(1.0f, 1.0f, 1.0f, 0.18f);
+
+        for (int x = -radius; x <= radius; x++)
+        {
+            Vector3 lineOffset = rightAxis * (x * gridSize);
+            Vector3 start = centerPosition + lineOffset - forwardAxis * extent;
+            Vector3 end = centerPosition + lineOffset + forwardAxis * extent;
+            Handles.DrawLine(start, end);
+        }
+
+        for (int z = -radius; z <= radius; z++)
+        {
+            Vector3 lineOffset = forwardAxis * (z * gridSize);
+            Vector3 start = centerPosition - rightAxis * extent + lineOffset;
+            Vector3 end = centerPosition + rightAxis * extent + lineOffset;
+            Handles.DrawLine(start, end);
+        }
+
+        float halfSize = gridSize * 0.5f;
+        Vector3 corner00 = centerPosition - rightAxis * halfSize - forwardAxis * halfSize;
+        Vector3 corner01 = centerPosition - rightAxis * halfSize + forwardAxis * halfSize;
+        Vector3 corner11 = centerPosition + rightAxis * halfSize + forwardAxis * halfSize;
+        Vector3 corner10 = centerPosition + rightAxis * halfSize - forwardAxis * halfSize;
+
+        Handles.color = new Color(0.2f, 0.9f, 1.0f, 0.35f);
+        Handles.DrawSolidRectangleWithOutline(
+            new Vector3[]
+            {
+                corner00,
+                corner01,
+                corner11,
+                corner10,
+            },
+            new Color(0.2f, 0.9f, 1.0f, 0.08f),
+            new Color(0.2f, 0.9f, 1.0f, 0.9f)
+        );
+    }
+
+    private void DrawMeshColliderBounds()
+    {
+        bool drewCurrentHitCollider = false;
+
+        if (previewInstance != null)
+        {
+            DrawPreviewMeshBounds(new Color(1.0f, 0.65f, 0.2f, 0.9f));
+        }
+
+        foreach (GameObject selectedObject in Selection.gameObjects)
+        {
+            if (selectedObject == null)
+            {
+                continue;
+            }
+
+            MeshCollider[] meshColliders = selectedObject.GetComponentsInChildren<MeshCollider>(true);
+            foreach (MeshCollider meshCollider in meshColliders)
+            {
+                if (meshCollider == null || !meshCollider.enabled || meshCollider.sharedMesh == null)
+                {
+                    continue;
+                }
+
+                bool isCurrentHit = meshCollider == lastSurfaceHitCollider;
+                drewCurrentHitCollider |= isCurrentHit;
+                DrawMeshColliderWire(
+                    meshCollider,
+                    isCurrentHit
+                        ? new Color(0.2f, 0.9f, 1.0f, 1.0f)
+                        : new Color(1.0f, 0.65f, 0.2f, 0.9f)
+                );
+
+                Handles.Label(
+                    meshCollider.bounds.center + Vector3.up * 0.1f,
+                    isCurrentHit ? $"MeshCollider: {meshCollider.name} (Hit)" : $"MeshCollider: {meshCollider.name}"
+                );
+            }
+        }
+
+        if (!drewCurrentHitCollider && lastSurfaceHitCollider != null)
+        {
+            DrawColliderWire(lastSurfaceHitCollider, new Color(0.2f, 0.9f, 1.0f, 1.0f));
+            Handles.Label(
+                lastSurfaceHitCollider.bounds.center + Vector3.up * 0.15f,
+                $"Current Hit: {lastSurfaceHitCollider.name} [{lastSurfaceHitCollider.GetType().Name}]"
+            );
+        }
+
+        DrawPlacementDebugLines();
+    }
+
+    private void DrawPlacementDebugLines()
+    {
+        if (previewInstance == null || !previewInstance.activeInHierarchy)
+        {
+            return;
+        }
+
+        float axisLength = Mathf.Max(0.35f, gridSize * 0.75f);
+        Vector3 origin = lastPreviewPosition;
+
+        Vector3 rightAxis = lastPreviewRotation * Vector3.right;
+        Vector3 forwardAxis = lastPreviewRotation * Vector3.forward;
+        Vector3 upAxis = lastSurfaceNormal.sqrMagnitude > 0.000001f ? lastSurfaceNormal.normalized : Vector3.up;
+
+        Handles.color = new Color(1.0f, 0.25f, 0.25f, 0.95f);
+        Handles.DrawAAPolyLine(3.0f, origin, origin + rightAxis * axisLength);
+        Handles.Label(origin + rightAxis * axisLength, "Right");
+
+        Handles.color = new Color(0.25f, 0.55f, 1.0f, 0.95f);
+        Handles.DrawAAPolyLine(3.0f, origin, origin + forwardAxis * axisLength);
+        Handles.Label(origin + forwardAxis * axisLength, "Forward");
+
+        Handles.color = new Color(0.25f, 1.0f, 0.35f, 0.95f);
+        Handles.DrawAAPolyLine(3.0f, origin, origin + upAxis * axisLength);
+        Handles.Label(origin + upAxis * axisLength, "Surface Normal");
+
+        if (lastSurfaceHitPoint != Vector3.zero)
+        {
+            Handles.color = new Color(1.0f, 0.9f, 0.2f, 0.95f);
+            Handles.DrawAAPolyLine(2.5f, lastSurfaceHitPoint, origin);
+            Handles.SphereHandleCap(0, lastSurfaceHitPoint, Quaternion.identity, Mathf.Max(0.05f, gridSize * 0.08f), EventType.Repaint);
+            Handles.Label(lastSurfaceHitPoint + Vector3.up * 0.08f, "Hit Point");
+        }
+
+        if (TryGetSurfaceTangentAxes(lastPreviewRotation, out Vector3 primaryAxis, out Vector3 secondaryAxis, out _))
+        {
+            Vector3 tangentOrigin = origin + upAxis * Mathf.Max(0.05f, gridSize * 0.08f);
+            float tangentLength = Mathf.Max(0.25f, gridSize * 0.5f);
+
+            Handles.color = new Color(1.0f, 0.7f, 0.2f, 0.9f);
+            Handles.DrawAAPolyLine(2.5f, tangentOrigin, tangentOrigin + primaryAxis * tangentLength);
+            Handles.Label(tangentOrigin + primaryAxis * tangentLength, "Primary Axis");
+
+            Handles.color = new Color(1.0f, 0.35f, 0.9f, 0.9f);
+            Handles.DrawAAPolyLine(2.5f, tangentOrigin, tangentOrigin + secondaryAxis * tangentLength);
+            Handles.Label(tangentOrigin + secondaryAxis * tangentLength, "Secondary Axis");
+        }
+
+        if (lastUsedNeighborSnap)
+        {
+            Handles.color = new Color(0.2f, 1.0f, 1.0f, 0.95f);
+            Handles.Label(origin + upAxis * (axisLength + 0.1f), $"Neighbor Snap: {neighborSnapMode}");
+        }
+    }
+
+    private void DrawPreviewMeshBounds(Color color)
+    {
+        MeshFilter[] meshFilters = previewInstance.GetComponentsInChildren<MeshFilter>(true);
+        foreach (MeshFilter meshFilter in meshFilters)
+        {
+            if (meshFilter.sharedMesh == null)
+            {
+                continue;
+            }
+
+            DrawWireMesh(meshFilter.sharedMesh, meshFilter.transform.localToWorldMatrix, color);
+        }
+
+        SkinnedMeshRenderer[] skinnedRenderers = previewInstance.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        foreach (SkinnedMeshRenderer skinnedRenderer in skinnedRenderers)
+        {
+            DrawTransformedBoundsWire(skinnedRenderer.localBounds, skinnedRenderer.transform.localToWorldMatrix, color);
+        }
+    }
+
+    private void DrawMeshColliderWire(MeshCollider meshCollider, Color color)
+    {
+        DrawWireMesh(meshCollider.sharedMesh, meshCollider.transform.localToWorldMatrix, color);
+    }
+
+    private void DrawColliderWire(Collider collider, Color color)
+    {
+        if (collider is MeshCollider meshCollider && meshCollider.sharedMesh != null)
+        {
+            DrawMeshColliderWire(meshCollider, color);
+            return;
+        }
+
+        if (collider is BoxCollider boxCollider)
+        {
+            DrawBoxColliderWire(boxCollider, color);
+            return;
+        }
+
+        DrawBoundsWire(collider.bounds, color);
+    }
+
+    private void DrawBoxColliderWire(BoxCollider boxCollider, Color color)
+    {
+        Vector3[] localCorners = GetBoxColliderLocalCorners(boxCollider);
+        Vector3[] worldCorners = new Vector3[localCorners.Length];
+        Matrix4x4 localToWorld = boxCollider.transform.localToWorldMatrix;
+
+        for (int i = 0; i < localCorners.Length; i++)
+        {
+            worldCorners[i] = localToWorld.MultiplyPoint3x4(localCorners[i]);
+        }
+
+        DrawCornerWire(worldCorners, color);
+    }
+
+    private void DrawTransformedBoundsWire(Bounds localBounds, Matrix4x4 localToWorld, Color color)
+    {
+        Vector3[] corners = GetTransformedBoundsCorners(localBounds, localToWorld);
+        DrawCornerWire(corners, color);
+    }
+
+    private void DrawWireMesh(Mesh mesh, Matrix4x4 localToWorld, Color color)
+    {
+        if (mesh == null)
+        {
+            return;
+        }
+
+        Vector3[] vertices = mesh.vertices;
+        int[] triangles = mesh.triangles;
+
+        Handles.color = color;
+
+        for (int i = 0; i < triangles.Length; i += 3)
+        {
+            Vector3 a = localToWorld.MultiplyPoint3x4(vertices[triangles[i]]);
+            Vector3 b = localToWorld.MultiplyPoint3x4(vertices[triangles[i + 1]]);
+            Vector3 c = localToWorld.MultiplyPoint3x4(vertices[triangles[i + 2]]);
+
+            Handles.DrawAAPolyLine(1.5f, a, b);
+            Handles.DrawAAPolyLine(1.5f, b, c);
+            Handles.DrawAAPolyLine(1.5f, c, a);
+        }
+    }
+
+    private void DrawBoundsWire(Bounds bounds, Color color)
+    {
+        Vector3[] corners = GetBoundsCorners(bounds);
+        DrawCornerWire(corners, color);
+    }
+
+    private void DrawCornerWire(Vector3[] corners, Color color)
+    {
+        Handles.color = color;
+
+        Handles.DrawAAPolyLine(2.0f, corners[0], corners[1], corners[3], corners[2], corners[0]);
+        Handles.DrawAAPolyLine(2.0f, corners[4], corners[5], corners[7], corners[6], corners[4]);
+        Handles.DrawAAPolyLine(2.0f, corners[0], corners[4]);
+        Handles.DrawAAPolyLine(2.0f, corners[1], corners[5]);
+        Handles.DrawAAPolyLine(2.0f, corners[2], corners[6]);
+        Handles.DrawAAPolyLine(2.0f, corners[3], corners[7]);
+    }
+
+    private void TryPlacePrefab(Vector2 mousePosition, bool isDragPlacement = false)
+    {
+        if (selectedPrefab == null)
+        {
+            Debug.LogWarning("Map Tool: Assign a prefab before placing.");
+            return;
+        }
+
+        if (!TryGetPlacementPosition(mousePosition, out Vector3 surfacePosition, out Vector3 surfaceNormal))
+        {
+            return;
+        }
+
+        Quaternion placementRotation = GetPlacementRotation(surfaceNormal);
+        bool useNeighborSnap = snapToNeighbor || Event.current.alt;
+        Vector3 snappedPosition = GetAlignedPreviewPosition(surfacePosition, placementRotation, surfaceNormal);
+        if (useNeighborSnap)
+        {
+            GetNeighborSnappedTransform(snappedPosition, placementRotation, out snappedPosition, out placementRotation);
+        }
+
+        if (isDragPlacement &&
+            lastDragPlacementPosition != Vector3.positiveInfinity &&
+            Vector3.Distance(lastDragPlacementPosition, snappedPosition) <= 0.01f)
+        {
+            return;
+        }
+
+        if (IsCellOccupied(snappedPosition))
+        {
+            if (isDragPlacement)
+            {
+                lastDragPlacementPosition = snappedPosition;
+                return;
+            }
+
+            Debug.LogWarning("Map Tool: A placement already exists at this snapped cell.");
+            return;
+        }
+
+        GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(selectedPrefab);
+        if (instance == null)
+        {
+            Debug.LogError("Map Tool: Failed to instantiate prefab.");
+            return;
+        }
+
+        Undo.RegisterCreatedObjectUndo(instance, "Place Map Prefab");
+
+        instance.transform.position = snappedPosition;
+        instance.transform.rotation = placementRotation;
+
+        ReplacePrimitiveCollidersWithMeshColliders(instance);
+
+        Transform parent = placementParent != null ? placementParent : GetOrCreateRootParent();
+        instance.transform.SetParent(parent, true);
+
+        recentPlacements.Add(instance);
+        lastDragPlacementPosition = snappedPosition;
+        Selection.activeGameObject = instance;
+    }
+
+    private void UpdatePreviewState()
+    {
+        if (!placementEnabled || selectedPrefab == null)
+        {
+            UpdatePreviewVisibility(false);
+            return;
+        }
+
+        EnsurePreviewInstance();
+    }
+
+    private void TryDeleteUnderCursor(Vector2 mousePosition)
+    {
+        Ray ray = HandleUtility.GUIPointToWorldRay(mousePosition);
+
+        if (Physics.Raycast(ray, out RaycastHit hit, 500.0f))
+        {
+            Undo.DestroyObjectImmediate(hit.collider.gameObject);
+        }
+    }
+
+    private bool TryGetPlacementPosition(Vector2 mousePosition, out Vector3 snappedSurfacePosition, out Vector3 surfaceNormal)
+    {
+        Ray ray = HandleUtility.GUIPointToWorldRay(mousePosition);
+
+        if (snapToSurface && TryGetBestSurfaceHit(ray, out RaycastHit hit))
+        {
+            if (topSurfaceOnly && hit.normal.y < 0.5f)
+            {
+                snappedSurfacePosition = Vector3.zero;
+                surfaceNormal = Vector3.up;
+                lastHitColliderName = $"{hit.collider.name} [{hit.collider.GetType().Name}] (Side Face Ignored)";
+                lastSurfaceHitCollider = hit.collider;
+                lastSurfaceHitPoint = hit.point;
+                lastSurfaceNormal = hit.normal.normalized;
+                return false;
+            }
+
+            Vector3 worldPoint = hit.point;
+            float surfaceY = hit.point.y + GetCurrentHeight();
+            snappedSurfacePosition = SnapToPlacement(new Vector3(worldPoint.x, surfaceY, worldPoint.z));
+            surfaceNormal = hit.normal.normalized;
+            lastHitColliderName = hit.collider != null ? $"{hit.collider.name} [{hit.collider.GetType().Name}]" : "??곸벉";
+            lastSurfaceHitCollider = hit.collider;
+            lastSurfaceHitPoint = hit.point;
+            lastSurfaceNormal = surfaceNormal;
+            return true;
+        }
+
+        if (!snapToSurface)
+        {
+            Plane plane = new Plane(Vector3.up, new Vector3(0.0f, GetCurrentHeight(), 0.0f));
+            if (plane.Raycast(ray, out float enter))
+            {
+                Vector3 worldPoint = ray.GetPoint(enter);
+                snappedSurfacePosition = SnapToPlacement(worldPoint);
+                surfaceNormal = Vector3.up;
+                lastHitColliderName = "Height Plane";
+                lastSurfaceHitCollider = null;
+                lastSurfaceHitPoint = worldPoint;
+                lastSurfaceNormal = Vector3.up;
+                return true;
+            }
+        }
+
+        snappedSurfacePosition = Vector3.zero;
+        surfaceNormal = Vector3.up;
+        lastHitColliderName = "??곸벉";
+        lastSurfaceHitCollider = null;
+        lastSurfaceHitPoint = Vector3.zero;
+        lastSurfaceNormal = Vector3.up;
+        return false;
+    }
+
+    private bool TryGetBestSurfaceHit(Ray ray, out RaycastHit bestHit)
+    {
+        bool previousQueriesHitBackfaces = Physics.queriesHitBackfaces;
+        Physics.queriesHitBackfaces = true;
+
+        RaycastHit[] hits = Physics.RaycastAll(ray, 500.0f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        Physics.queriesHitBackfaces = previousQueriesHitBackfaces;
+
+        if (hits.Length == 0)
+        {
+            bestHit = default;
+            return false;
+        }
+
+        bool foundMeshHit = false;
+        float bestMeshDistance = float.PositiveInfinity;
+        RaycastHit bestMeshHit = default;
+
+        bool foundFallbackHit = false;
+        float bestFallbackDistance = float.PositiveInfinity;
+        RaycastHit bestFallbackHit = default;
+
+        foreach (RaycastHit hit in hits)
+        {
+            if (hit.collider == null || previewInstance != null && hit.collider.transform.IsChildOf(previewInstance.transform))
+            {
+                continue;
+            }
+
+            if (hit.collider is MeshCollider)
+            {
+                if (!foundMeshHit || hit.distance < bestMeshDistance)
+                {
+                    bestMeshDistance = hit.distance;
+                    bestMeshHit = hit;
+                    foundMeshHit = true;
+                }
+
+                continue;
+            }
+
+            if (!foundFallbackHit || hit.distance < bestFallbackDistance)
+            {
+                bestFallbackDistance = hit.distance;
+                bestFallbackHit = hit;
+                foundFallbackHit = true;
+            }
+        }
+
+        if (foundMeshHit)
+        {
+            bestHit = bestMeshHit;
+            return true;
+        }
+
+        if (foundFallbackHit)
+        {
+            bestHit = bestFallbackHit;
+            return true;
+        }
+
+        bestHit = default;
+        return false;
+    }
+
+    private Vector3 SnapToPlacement(Vector3 worldPoint)
+    {
+        if (!snapToGrid)
+        {
+            return worldPoint;
+        }
+
+        float snappedX = Mathf.Round(worldPoint.x / gridSize) * gridSize;
+        float snappedZ = Mathf.Round(worldPoint.z / gridSize) * gridSize;
+
+        return new Vector3(snappedX, worldPoint.y, snappedZ);
+    }
+
+    private float GetCurrentHeight()
+    {
+        return heightLevel * heightStep;
+    }
+
+    private Quaternion GetPlacementRotation(Vector3 surfaceNormal)
+    {
+        if (!alignToSurfaceNormal)
+        {
+            return Quaternion.Euler(0.0f, currentRotationDegrees, 0.0f);
+        }
+
+        Quaternion surfaceRotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal);
+        Quaternion localSpin = Quaternion.AngleAxis(currentRotationDegrees, Vector3.up);
+        return surfaceRotation * localSpin;
+    }
+
+    private Vector3 GetAlignedPreviewPosition(Vector3 surfacePosition, Quaternion placementRotation, Vector3 surfaceNormal)
+    {
+        EnsurePreviewInstance();
+        if (previewInstance == null)
+        {
+            return surfacePosition;
+        }
+
+        previewInstance.transform.rotation = placementRotation;
+        previewInstance.transform.position = surfacePosition;
+
+        List<Vector3> previewPoints = new List<Vector3>();
+        if (!TryCollectPreviewWorldPoints(previewPoints, out _, out _))
+        {
+            return surfacePosition;
+        }
+
+        float nearestFaceOffset = GetNearestFaceOffsetAlongNormal(previewPoints, surfacePosition, surfaceNormal);
+        return surfacePosition + surfaceNormal * nearestFaceOffset;
+    }
+
+    private float GetNearestFaceOffsetAlongNormal(List<Vector3> worldPoints, Vector3 origin, Vector3 normal)
+    {
+        float minProjection = float.PositiveInfinity;
+
+        foreach (Vector3 point in worldPoints)
+        {
+            float projection = Vector3.Dot(point - origin, normal);
+            minProjection = Mathf.Min(minProjection, projection);
+        }
+
+        if (float.IsPositiveInfinity(minProjection))
+        {
+            return 0.0f;
+        }
+
+        return -minProjection;
+    }
+
+    private void GetNeighborSnappedTransform(Vector3 targetPosition, Quaternion placementRotation, out Vector3 snappedPosition, out Quaternion snappedRotation)
+    {
+        if (neighborSnapMode == NeighborSnapMode.Face &&
+            TryGetFaceNeighborSnappedTransform(targetPosition, placementRotation, out snappedPosition, out snappedRotation))
+        {
+            return;
+        }
+
+        if (neighborSnapMode == NeighborSnapMode.FaceExact &&
+            TryGetFaceExactNeighborSnappedTransform(targetPosition, placementRotation, out snappedPosition, out snappedRotation))
+        {
+            return;
+        }
+
+        if (neighborSnapMode == NeighborSnapMode.Edge &&
+            TryGetEdgeNeighborSnappedTransform(targetPosition, placementRotation, out snappedPosition, out snappedRotation))
+        {
+            return;
+        }
+
+        snappedPosition = GetAxisNeighborSnappedPosition(targetPosition, placementRotation);
+        snappedRotation = placementRotation;
+    }
+
+    private bool TryGetFaceNeighborSnappedTransform(Vector3 targetPosition, Quaternion placementRotation, out Vector3 snappedPosition, out Quaternion snappedRotation)
+    {
+        EnsurePreviewInstance();
+        if (previewInstance == null)
+        {
+            snappedPosition = targetPosition;
+            snappedRotation = placementRotation;
+            return false;
+        }
+
+        if (!TryGetSurfaceTangentAxes(placementRotation, out _, out _, out Vector3 upAxis))
+        {
+            snappedPosition = targetPosition;
+            snappedRotation = placementRotation;
+            return false;
+        }
+
+        if (!TryCollectPreviewWorldPointsAt(targetPosition, placementRotation, out List<Vector3> basePreviewPoints, out Vector3 previewCenter, out float previewRadius))
+        {
+            snappedPosition = targetPosition;
+            snappedRotation = placementRotation;
+            return false;
+        }
+
+        float searchRadius = previewRadius + neighborSnapDistance + faceAssistSnapDistance + gridSize;
+        Collider[] nearbyColliders = Physics.OverlapSphere(
+            previewCenter,
+            searchRadius,
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore
+        );
+
+        Vector3 bestPosition = targetPosition;
+        Quaternion bestRotation = placementRotation;
+        bool foundSnap = false;
+        float bestScore = float.PositiveInfinity;
+
+        foreach (Collider collider in nearbyColliders)
+        {
+            if (collider == null ||
+                collider == lastSurfaceHitCollider ||
+                collider.transform.IsChildOf(previewInstance.transform))
+            {
+                continue;
+            }
+
+            List<Vector3> neighborPoints = new List<Vector3>();
+            if (!TryCollectColliderWorldPoints(collider, neighborPoints))
+            {
+                continue;
+            }
+
+            Quaternion candidateRotation = placementRotation;
+            float rotationPenalty = 0.0f;
+            if (autoAlignToNeighbor && TryGetNeighborAlignedRotation(collider, placementRotation, upAxis, out Quaternion alignedRotation, out float angleDelta))
+            {
+                candidateRotation = alignedRotation;
+                rotationPenalty = angleDelta * 0.01f;
+            }
+
+            if (!TryCollectPreviewWorldPointsAt(targetPosition, candidateRotation, out List<Vector3> candidatePreviewPoints, out _, out _))
+            {
+                continue;
+            }
+
+            if (!TryGetSurfaceTangentAxes(candidateRotation, out Vector3 primaryAxis, out Vector3 secondaryAxis, out Vector3 candidateUpAxis))
+            {
+                continue;
+            }
+
+            if (TryGetFaceSnapCandidate(targetPosition, candidatePreviewPoints, neighborPoints, primaryAxis, secondaryAxis, candidateUpAxis, out Vector3 primaryPosition, out float primaryScore) &&
+                primaryScore + rotationPenalty < bestScore)
+            {
+                bestPosition = primaryPosition;
+                bestRotation = candidateRotation;
+                bestScore = primaryScore + rotationPenalty;
+                foundSnap = true;
+            }
+
+            if (TryGetFaceSnapCandidate(targetPosition, candidatePreviewPoints, neighborPoints, secondaryAxis, primaryAxis, candidateUpAxis, out Vector3 secondaryPosition, out float secondaryScore) &&
+                secondaryScore + rotationPenalty < bestScore)
+            {
+                bestPosition = secondaryPosition;
+                bestRotation = candidateRotation;
+                bestScore = secondaryScore + rotationPenalty;
+                foundSnap = true;
+            }
+        }
+
+        snappedPosition = bestPosition;
+        snappedRotation = bestRotation;
+        return foundSnap;
+    }
+
+    private bool TryGetEdgeNeighborSnappedTransform(Vector3 targetPosition, Quaternion placementRotation, out Vector3 snappedPosition, out Quaternion snappedRotation)
+    {
+        return TryGetStrictPlaneNeighborSnappedTransform(targetPosition, placementRotation, out snappedPosition, out snappedRotation);
+    }
+
+    private bool TryGetFaceExactNeighborSnappedTransform(Vector3 targetPosition, Quaternion placementRotation, out Vector3 snappedPosition, out Quaternion snappedRotation)
+    {
+        return TryGetStrictPlaneNeighborSnappedTransform(targetPosition, placementRotation, out snappedPosition, out snappedRotation);
+    }
+
+    private bool TryGetStrictPlaneNeighborSnappedTransform(Vector3 targetPosition, Quaternion placementRotation, out Vector3 snappedPosition, out Quaternion snappedRotation)
+    {
+        EnsurePreviewInstance();
+        if (previewInstance == null)
+        {
+            snappedPosition = targetPosition;
+            snappedRotation = placementRotation;
+            return false;
+        }
+
+        if (!TryGetSurfaceTangentAxes(placementRotation, out _, out _, out Vector3 upAxis))
+        {
+            snappedPosition = targetPosition;
+            snappedRotation = placementRotation;
+            return false;
+        }
+
+        if (!TryCollectPreviewWorldPointsAt(targetPosition, placementRotation, out List<Vector3> basePreviewPoints, out Vector3 previewCenter, out float previewRadius))
+        {
+            snappedPosition = targetPosition;
+            snappedRotation = placementRotation;
+            return false;
+        }
+
+        float searchRadius = previewRadius + neighborSnapDistance + faceAssistSnapDistance + gridSize;
+        Collider[] nearbyColliders = Physics.OverlapSphere(
+            previewCenter,
+            searchRadius,
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore
+        );
+
+        Vector3 bestPosition = targetPosition;
+        Quaternion bestRotation = placementRotation;
+        bool foundSnap = false;
+        float bestScore = float.PositiveInfinity;
+
+        foreach (Collider collider in nearbyColliders)
+        {
+            if (collider == null ||
+                collider == lastSurfaceHitCollider ||
+                collider.transform.IsChildOf(previewInstance.transform))
+            {
+                continue;
+            }
+
+            List<Vector3> neighborPoints = new List<Vector3>();
+            if (!TryCollectColliderWorldPoints(collider, neighborPoints))
+            {
+                continue;
+            }
+
+            Quaternion candidateRotation = placementRotation;
+            float rotationPenalty = 0.0f;
+            if (autoAlignToNeighbor && TryGetNeighborAlignedRotation(collider, placementRotation, upAxis, out Quaternion alignedRotation, out float angleDelta))
+            {
+                candidateRotation = alignedRotation;
+                rotationPenalty = angleDelta * 0.01f;
+            }
+
+            if (!TryCollectPreviewWorldPointsAt(targetPosition, candidateRotation, out List<Vector3> candidatePreviewPoints, out _, out _))
+            {
+                continue;
+            }
+
+            if (!TryGetSurfaceTangentAxes(candidateRotation, out Vector3 primaryAxis, out Vector3 secondaryAxis, out Vector3 candidateUpAxis))
+            {
+                continue;
+            }
+
+            if (!TryGetEdgeSnapCandidate(targetPosition, candidatePreviewPoints, neighborPoints, primaryAxis, secondaryAxis, candidateUpAxis, out Vector3 candidatePosition, out float candidateScore))
+            {
+                continue;
+            }
+
+            float totalScore = candidateScore + rotationPenalty;
+            if (totalScore < bestScore)
+            {
+                bestPosition = candidatePosition;
+                bestRotation = candidateRotation;
+                bestScore = totalScore;
+                foundSnap = true;
+            }
+        }
+
+        snappedPosition = bestPosition;
+        snappedRotation = bestRotation;
+        return foundSnap;
+    }
+
+    private bool TryGetEdgeSnapCandidate(
+        Vector3 targetPosition,
+        List<Vector3> previewPoints,
+        List<Vector3> neighborPoints,
+        Vector3 primaryAxis,
+        Vector3 secondaryAxis,
+        Vector3 upAxis,
+        out Vector3 candidatePosition,
+        out float candidateScore)
+    {
+        candidatePosition = targetPosition;
+        candidateScore = 0.0f;
+
+        if (!TryGetBestFaceSnapDelta(previewPoints, neighborPoints, primaryAxis, secondaryAxis, upAxis, out float primaryDelta))
+        {
+            return false;
+        }
+
+        if (!TryGetBestFaceSnapDelta(previewPoints, neighborPoints, secondaryAxis, primaryAxis, upAxis, out float secondaryDelta))
+        {
+            return false;
+        }
+
+        candidatePosition += primaryAxis * primaryDelta;
+        candidatePosition += secondaryAxis * secondaryDelta;
+        candidateScore = Mathf.Abs(primaryDelta) + Mathf.Abs(secondaryDelta);
+        return true;
+    }
+
+    private bool TryGetFaceSnapCandidate(
+        Vector3 targetPosition,
+        List<Vector3> previewPoints,
+        List<Vector3> neighborPoints,
+        Vector3 mainAxis,
+        Vector3 assistAxis,
+        Vector3 upAxis,
+        out Vector3 candidatePosition,
+        out float candidateScore)
+    {
+        candidatePosition = targetPosition;
+        candidateScore = 0.0f;
+
+        if (!TryGetBestFaceSnapDelta(previewPoints, neighborPoints, mainAxis, assistAxis, upAxis, out float mainDelta))
+        {
+            return false;
+        }
+
+        candidatePosition += mainAxis * mainDelta;
+        candidateScore = Mathf.Abs(mainDelta);
+
+        if (faceAssistSnapDistance > 0.0f &&
+            TryGetBestAssistDelta(previewPoints, neighborPoints, assistAxis, faceAssistSnapDistance, out float assistDelta))
+        {
+            candidatePosition += assistAxis * assistDelta;
+            candidateScore += Mathf.Abs(assistDelta) * 0.35f;
+        }
+
+        return true;
+    }
+
+    private bool TryGetBestAssistDelta(List<Vector3> previewPoints, List<Vector3> neighborPoints, Vector3 axis, float assistDistance, out float bestDelta)
+    {
+        GetProjectionInterval(previewPoints, axis, out float previewMin, out float previewMax);
+        GetProjectionInterval(neighborPoints, axis, out float neighborMin, out float neighborMax);
+
+        bool foundSnap = false;
+        bestDelta = 0.0f;
+        UpdateBestAssistDelta(neighborMin - previewMin, assistDistance, ref foundSnap, ref bestDelta);
+        UpdateBestAssistDelta(neighborMax - previewMax, assistDistance, ref foundSnap, ref bestDelta);
+        UpdateBestAssistDelta(neighborMin - previewMax, assistDistance, ref foundSnap, ref bestDelta);
+        UpdateBestAssistDelta(neighborMax - previewMin, assistDistance, ref foundSnap, ref bestDelta);
+        return foundSnap;
+    }
+
+    private void UpdateBestAssistDelta(float delta, float assistDistance, ref bool foundSnap, ref float bestDelta)
+    {
+        if (Mathf.Abs(delta) > assistDistance)
+        {
+            return;
+        }
+
+        if (foundSnap && Mathf.Abs(delta) >= Mathf.Abs(bestDelta))
+        {
+            return;
+        }
+
+        bestDelta = delta;
+        foundSnap = true;
+    }
+
+    private bool TryGetNeighborAlignedRotation(Collider collider, Quaternion placementRotation, Vector3 upAxis, out Quaternion alignedRotation, out float angleDelta)
+    {
+        alignedRotation = placementRotation;
+        angleDelta = 0.0f;
+
+        Vector3 previewForward = Vector3.ProjectOnPlane(placementRotation * Vector3.forward, upAxis);
+        Vector3 previewRight = Vector3.ProjectOnPlane(placementRotation * Vector3.right, upAxis);
+        Vector3 neighborForward = Vector3.ProjectOnPlane(collider.transform.forward, upAxis);
+        Vector3 neighborRight = Vector3.ProjectOnPlane(collider.transform.right, upAxis);
+
+        if (previewForward.sqrMagnitude <= 0.000001f || previewRight.sqrMagnitude <= 0.000001f ||
+            neighborForward.sqrMagnitude <= 0.000001f || neighborRight.sqrMagnitude <= 0.000001f)
+        {
+            return false;
+        }
+
+        previewForward.Normalize();
+        previewRight.Normalize();
+        neighborForward.Normalize();
+        neighborRight.Normalize();
+
+        Vector3[] sourceAxes = { previewForward, previewRight };
+        Vector3[] targetAxes = { neighborForward, -neighborForward, neighborRight, -neighborRight };
+
+        float bestAbsDelta = float.PositiveInfinity;
+        float bestDelta = 0.0f;
+
+        foreach (Vector3 sourceAxis in sourceAxes)
+        {
+            foreach (Vector3 targetAxis in targetAxes)
+            {
+                float delta = Vector3.SignedAngle(sourceAxis, targetAxis, upAxis);
+                float absDelta = Mathf.Abs(delta);
+                if (absDelta < bestAbsDelta)
+                {
+                    bestAbsDelta = absDelta;
+                    bestDelta = delta;
+                }
+            }
+        }
+
+        if (bestAbsDelta > neighborAngleSnapThreshold)
+        {
+            return false;
+        }
+
+        alignedRotation = Quaternion.AngleAxis(bestDelta, upAxis) * placementRotation;
+        angleDelta = bestAbsDelta;
+        return true;
+    }
+
+    private bool TryCollectPreviewWorldPointsAt(Vector3 position, Quaternion rotation, out List<Vector3> points, out Vector3 center, out float radius)
+    {
+        previewInstance.transform.position = position;
+        previewInstance.transform.rotation = rotation;
+        points = new List<Vector3>();
+        return TryCollectPreviewWorldPoints(points, out center, out radius);
+    }
+
+    private bool TryGetSurfaceTangentAxes(Quaternion placementRotation, out Vector3 primaryAxis, out Vector3 secondaryAxis, out Vector3 upAxis)
+    {
+        upAxis = lastSurfaceNormal.sqrMagnitude > 0.000001f ? lastSurfaceNormal.normalized : Vector3.up;
+        primaryAxis = Vector3.ProjectOnPlane(placementRotation * Vector3.right, upAxis);
+
+        if (primaryAxis.sqrMagnitude <= 0.000001f)
+        {
+            primaryAxis = Vector3.ProjectOnPlane(Vector3.right, upAxis);
+        }
+
+        if (primaryAxis.sqrMagnitude <= 0.000001f)
+        {
+            secondaryAxis = Vector3.zero;
+            return false;
+        }
+
+        primaryAxis.Normalize();
+        secondaryAxis = Vector3.Cross(upAxis, primaryAxis).normalized;
+        return secondaryAxis.sqrMagnitude > 0.000001f;
+    }
+
+    private bool TryGetBestFaceSnapDelta(List<Vector3> previewPoints, List<Vector3> neighborPoints, Vector3 axis, Vector3 overlapAxis, Vector3 upAxis, out float bestDelta)
+    {
+        GetProjectionInterval(previewPoints, axis, out float previewMin, out float previewMax);
+        GetProjectionInterval(neighborPoints, axis, out float neighborMin, out float neighborMax);
+        GetProjectionInterval(previewPoints, overlapAxis, out float previewOverlapMin, out float previewOverlapMax);
+        GetProjectionInterval(neighborPoints, overlapAxis, out float neighborOverlapMin, out float neighborOverlapMax);
+        GetProjectionInterval(previewPoints, upAxis, out float previewUpMin, out float previewUpMax);
+        GetProjectionInterval(neighborPoints, upAxis, out float neighborUpMin, out float neighborUpMax);
+
+        float verticalTolerance = Mathf.Max(neighborSnapDistance, faceAssistSnapDistance);
+
+        if (!IntervalsOverlap(previewOverlapMin, previewOverlapMax, neighborOverlapMin, neighborOverlapMax) ||
+            !IntervalsOverlapOrWithinDistance(previewUpMin, previewUpMax, neighborUpMin, neighborUpMax, verticalTolerance))
+        {
+            bestDelta = 0.0f;
+            return false;
+        }
+
+        bool foundSnap = false;
+        bestDelta = 0.0f;
+        UpdateBestAxisSnap(neighborMin - previewMax, ref foundSnap, ref bestDelta);
+        UpdateBestAxisSnap(neighborMax - previewMin, ref foundSnap, ref bestDelta);
+        return foundSnap;
+    }
+
+    private bool IntervalsOverlapOrWithinDistance(float minA, float maxA, float minB, float maxB, float tolerance)
+    {
+        if (IntervalsOverlap(minA, maxA, minB, maxB))
+        {
+            return true;
+        }
+
+        if (maxA < minB)
+        {
+            return (minB - maxA) <= tolerance;
+        }
+
+        if (maxB < minA)
+        {
+            return (minA - maxB) <= tolerance;
+        }
+
+        return false;
+    }
+
+    private void GetProjectionInterval(List<Vector3> points, Vector3 axis, out float minProjection, out float maxProjection)
+    {
+        minProjection = float.PositiveInfinity;
+        maxProjection = float.NegativeInfinity;
+
+        foreach (Vector3 point in points)
+        {
+            float projection = Vector3.Dot(point, axis);
+            minProjection = Mathf.Min(minProjection, projection);
+            maxProjection = Mathf.Max(maxProjection, projection);
+        }
+    }
+
+    private bool TryCollectColliderWorldPoints(Collider collider, List<Vector3> points)
+    {
+        points.Clear();
+
+        if (collider is MeshCollider meshCollider && meshCollider.sharedMesh != null)
+        {
+            Vector3[] vertices = meshCollider.sharedMesh.vertices;
+            Matrix4x4 localToWorld = meshCollider.transform.localToWorldMatrix;
+            foreach (Vector3 localVertex in vertices)
+            {
+                points.Add(localToWorld.MultiplyPoint3x4(localVertex));
+            }
+
+            return points.Count > 0;
+        }
+
+        if (collider is BoxCollider boxCollider)
+        {
+            Vector3 halfSize = boxCollider.size * 0.5f;
+            Vector3 center = boxCollider.center;
+            Vector3[] localCorners =
+            {
+                center + new Vector3(-halfSize.x, -halfSize.y, -halfSize.z),
+                center + new Vector3(-halfSize.x, -halfSize.y,  halfSize.z),
+                center + new Vector3(-halfSize.x,  halfSize.y, -halfSize.z),
+                center + new Vector3(-halfSize.x,  halfSize.y,  halfSize.z),
+                center + new Vector3( halfSize.x, -halfSize.y, -halfSize.z),
+                center + new Vector3( halfSize.x, -halfSize.y,  halfSize.z),
+                center + new Vector3( halfSize.x,  halfSize.y, -halfSize.z),
+                center + new Vector3( halfSize.x,  halfSize.y,  halfSize.z),
+            };
+
+            Matrix4x4 localToWorld = boxCollider.transform.localToWorldMatrix;
+            foreach (Vector3 localCorner in localCorners)
+            {
+                points.Add(localToWorld.MultiplyPoint3x4(localCorner));
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private Vector3 GetAxisNeighborSnappedPosition(Vector3 targetPosition, Quaternion placementRotation)
+    {
+        EnsurePreviewInstance();
+        if (previewInstance == null)
+        {
+            return targetPosition;
+        }
+
+        previewInstance.transform.position = targetPosition;
+        previewInstance.transform.rotation = placementRotation;
+
+        if (!TryGetObjectBounds(previewInstance, out Bounds previewBounds))
+        {
+            return targetPosition;
+        }
+
+        float searchRadius = Mathf.Max(previewBounds.extents.x, previewBounds.extents.z) + neighborSnapDistance + gridSize;
+        Collider[] nearbyColliders = Physics.OverlapSphere(
+            previewBounds.center,
+            searchRadius,
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore
+        );
+
+        Vector3 bestPosition = targetPosition;
+        bool foundSnapX = false;
+        bool foundSnapZ = false;
+        float bestDeltaX = neighborSnapDistance;
+        float bestDeltaZ = neighborSnapDistance;
+
+        foreach (Collider collider in nearbyColliders)
+        {
+            if (collider == null ||
+                collider == lastSurfaceHitCollider ||
+                collider.transform.IsChildOf(previewInstance.transform))
+            {
+                continue;
+            }
+
+            Bounds neighborBounds = collider.bounds;
+
+            bool overlapY = IntervalsOverlap(previewBounds.min.y, previewBounds.max.y, neighborBounds.min.y, neighborBounds.max.y);
+
+            if (!overlapY)
+            {
+                continue;
+            }
+
+            bool overlapZ = IntervalsOverlap(previewBounds.min.z, previewBounds.max.z, neighborBounds.min.z, neighborBounds.max.z);
+            bool overlapX = IntervalsOverlap(previewBounds.min.x, previewBounds.max.x, neighborBounds.min.x, neighborBounds.max.x);
+
+            if (overlapZ)
+            {
+                UpdateBestAxisSnap(
+                    neighborBounds.min.x - previewBounds.max.x,
+                    ref foundSnapX,
+                    ref bestDeltaX
+                );
+                UpdateBestAxisSnap(
+                    neighborBounds.max.x - previewBounds.min.x,
+                    ref foundSnapX,
+                    ref bestDeltaX
+                );
+            }
+
+            if (overlapX)
+            {
+                UpdateBestAxisSnap(
+                    neighborBounds.min.z - previewBounds.max.z,
+                    ref foundSnapZ,
+                    ref bestDeltaZ
+                );
+                UpdateBestAxisSnap(
+                    neighborBounds.max.z - previewBounds.min.z,
+                    ref foundSnapZ,
+                    ref bestDeltaZ
+                );
+            }
+        }
+
+        if (foundSnapX)
+        {
+            bestPosition.x += bestDeltaX;
+        }
+
+        if (foundSnapZ)
+        {
+            bestPosition.z += bestDeltaZ;
+        }
+
+        return bestPosition;
+    }
+
+    private bool IntervalsOverlap(float minA, float maxA, float minB, float maxB)
+    {
+        return maxA >= minB && maxB >= minA;
+    }
+
+    private void UpdateBestAxisSnap(float delta, ref bool foundSnap, ref float bestDelta)
+    {
+        if (Mathf.Abs(delta) > neighborSnapDistance)
+        {
+            return;
+        }
+
+        if (foundSnap && Mathf.Abs(delta) >= Mathf.Abs(bestDelta))
+        {
+            return;
+        }
+
+        bestDelta = delta;
+        foundSnap = true;
+    }
+
+    private Vector3[] GetBoundsCorners(Bounds bounds)
+    {
+        Vector3 min = bounds.min;
+        Vector3 max = bounds.max;
+
+        return new Vector3[]
+        {
+            new Vector3(min.x, min.y, min.z),
+            new Vector3(min.x, min.y, max.z),
+            new Vector3(min.x, max.y, min.z),
+            new Vector3(min.x, max.y, max.z),
+            new Vector3(max.x, min.y, min.z),
+            new Vector3(max.x, min.y, max.z),
+            new Vector3(max.x, max.y, min.z),
+            new Vector3(max.x, max.y, max.z),
+        };
+    }
+
+    private Vector3[] GetBoxColliderLocalCorners(BoxCollider boxCollider)
+    {
+        Vector3 halfSize = boxCollider.size * 0.5f;
+        Vector3 center = boxCollider.center;
+
+        return new Vector3[]
+        {
+            center + new Vector3(-halfSize.x, -halfSize.y, -halfSize.z),
+            center + new Vector3(-halfSize.x, -halfSize.y,  halfSize.z),
+            center + new Vector3(-halfSize.x,  halfSize.y, -halfSize.z),
+            center + new Vector3(-halfSize.x,  halfSize.y,  halfSize.z),
+            center + new Vector3( halfSize.x, -halfSize.y, -halfSize.z),
+            center + new Vector3( halfSize.x, -halfSize.y,  halfSize.z),
+            center + new Vector3( halfSize.x,  halfSize.y, -halfSize.z),
+            center + new Vector3( halfSize.x,  halfSize.y,  halfSize.z),
+        };
+    }
+
+    private Vector3[] GetTransformedBoundsCorners(Bounds localBounds, Matrix4x4 localToWorld)
+    {
+        Vector3[] localCorners = GetBoundsCorners(localBounds);
+        Vector3[] worldCorners = new Vector3[localCorners.Length];
+
+        for (int i = 0; i < localCorners.Length; i++)
+        {
+            worldCorners[i] = localToWorld.MultiplyPoint3x4(localCorners[i]);
+        }
+
+        return worldCorners;
+    }
+
+    private bool TryCollectPreviewWorldPoints(List<Vector3> points, out Vector3 center, out float radius)
+    {
+        points.Clear();
+
+        MeshFilter[] meshFilters = previewInstance.GetComponentsInChildren<MeshFilter>(true);
+        foreach (MeshFilter meshFilter in meshFilters)
+        {
+            if (meshFilter.sharedMesh == null)
+            {
+                continue;
+            }
+
+            Vector3[] vertices = meshFilter.sharedMesh.vertices;
+            Matrix4x4 localToWorld = meshFilter.transform.localToWorldMatrix;
+            foreach (Vector3 localVertex in vertices)
+            {
+                points.Add(localToWorld.MultiplyPoint3x4(localVertex));
+            }
+        }
+
+        SkinnedMeshRenderer[] skinnedRenderers = previewInstance.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        foreach (SkinnedMeshRenderer skinnedRenderer in skinnedRenderers)
+        {
+            Vector3[] worldCorners = GetTransformedBoundsCorners(skinnedRenderer.localBounds, skinnedRenderer.transform.localToWorldMatrix);
+            foreach (Vector3 corner in worldCorners)
+            {
+                points.Add(corner);
+            }
+        }
+
+        if (points.Count == 0)
+        {
+            center = Vector3.zero;
+            radius = 0.0f;
+            return false;
+        }
+
+        center = GetPointAverage(points);
+        radius = GetMaxDistanceFromPoint(points, center);
+        return true;
+    }
+
+    private Vector3 GetPointAverage(List<Vector3> points)
+    {
+        Vector3 sum = Vector3.zero;
+        foreach (Vector3 point in points)
+        {
+            sum += point;
+        }
+
+        return sum / points.Count;
+    }
+
+    private float GetMaxDistanceFromPoint(List<Vector3> points, Vector3 origin)
+    {
+        float maxDistance = 0.0f;
+        foreach (Vector3 point in points)
+        {
+            maxDistance = Mathf.Max(maxDistance, Vector3.Distance(origin, point));
+        }
+
+        return maxDistance;
+    }
+
+    private void EnsurePreviewInstance()
+    {
+        if (previewInstance != null)
+        {
+            if (previewInstance.name != $"{selectedPrefab.name}_Preview")
+            {
+                DestroyPreviewInstance();
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        previewInstance = (GameObject)PrefabUtility.InstantiatePrefab(selectedPrefab);
+        if (previewInstance == null)
+        {
+            return;
+        }
+
+        previewInstance.name = $"{selectedPrefab.name}_Preview";
+        previewInstance.hideFlags = HideFlags.HideAndDontSave;
+
+        foreach (Collider collider in previewInstance.GetComponentsInChildren<Collider>(true))
+        {
+            collider.enabled = false;
+        }
+
+        foreach (MonoBehaviour behaviour in previewInstance.GetComponentsInChildren<MonoBehaviour>(true))
+        {
+            behaviour.enabled = false;
+        }
+
+        UpdatePreviewMaterial(false);
+        UpdatePreviewVisibility(true);
+    }
+
+    private void UpdatePreviewTransform(Vector3 position, Quaternion rotation)
+    {
+        EnsurePreviewInstance();
+        if (previewInstance == null)
+        {
+            return;
+        }
+
+        previewInstance.transform.position = position;
+        previewInstance.transform.rotation = rotation;
+        UpdatePreviewVisibility(true);
+    }
+
+    private bool TryGetObjectBounds(GameObject targetObject, out Bounds combinedBounds)
+    {
+        bool hasBounds = false;
+        combinedBounds = new Bounds();
+
+        Renderer[] renderers = targetObject.GetComponentsInChildren<Renderer>(true);
+        foreach (Renderer renderer in renderers)
+        {
+            if (!hasBounds)
+            {
+                combinedBounds = renderer.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                combinedBounds.Encapsulate(renderer.bounds);
+            }
+        }
+
+        if (hasBounds)
+        {
+            return true;
+        }
+
+        Collider[] colliders = targetObject.GetComponentsInChildren<Collider>(true);
+        foreach (Collider collider in colliders)
+        {
+            if (!hasBounds)
+            {
+                combinedBounds = collider.bounds;
+                hasBounds = true;
+            }
+            else
+            {
+                combinedBounds.Encapsulate(collider.bounds);
+            }
+        }
+
+        return hasBounds;
+    }
+
+    private void UpdatePreviewVisibility(bool visible)
+    {
+        if (previewInstance == null)
+        {
+            return;
+        }
+
+        previewInstance.SetActive(visible);
+    }
+
+    private void UpdatePreviewMaterial(bool occupied)
+    {
+        EnsurePreviewMaterial();
+        EnsurePreviewInstance();
+
+        if (previewMaterial == null || previewInstance == null)
+        {
+            return;
+        }
+
+        Color previewColor = occupied
+            ? new Color(1.0f, 0.3f, 0.3f, 0.35f)
+            : new Color(0.35f, 0.85f, 1.0f, 0.35f);
+
+        previewMaterial.SetColor("_BaseColor", previewColor);
+
+        foreach (Renderer renderer in previewInstance.GetComponentsInChildren<Renderer>(true))
+        {
+            Material[] previewMaterials = new Material[renderer.sharedMaterials.Length];
+
+            for (int i = 0; i < previewMaterials.Length; i++)
+            {
+                previewMaterials[i] = previewMaterial;
+            }
+
+            renderer.sharedMaterials = previewMaterials;
+        }
+    }
+
+    private void EnsurePreviewMaterial()
+    {
+        if (previewMaterial != null)
+        {
+            return;
+        }
+
+        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+        if (shader == null)
+        {
+            shader = Shader.Find("Standard");
+        }
+
+        if (shader == null)
+        {
+            return;
+        }
+
+        previewMaterial = new Material(shader)
+        {
+            hideFlags = HideFlags.HideAndDontSave
+        };
+
+        if (previewMaterial.HasProperty("_Surface"))
+        {
+            previewMaterial.SetFloat("_Surface", 1.0f);
+        }
+
+        if (previewMaterial.HasProperty("_Blend"))
+        {
+            previewMaterial.SetFloat("_Blend", 0.0f);
+        }
+
+        if (previewMaterial.HasProperty("_SrcBlend"))
+        {
+            previewMaterial.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        }
+
+        if (previewMaterial.HasProperty("_DstBlend"))
+        {
+            previewMaterial.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        }
+
+        if (previewMaterial.HasProperty("_ZWrite"))
+        {
+            previewMaterial.SetFloat("_ZWrite", 0.0f);
+        }
+
+        previewMaterial.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+    }
+
+    private void DestroyPreviewInstance()
+    {
+        if (previewInstance != null)
+        {
+            DestroyImmediate(previewInstance);
+            previewInstance = null;
+        }
+
+        if (previewMaterial != null)
+        {
+            DestroyImmediate(previewMaterial);
+            previewMaterial = null;
+        }
+    }
+
+    private Transform GetOrCreateRootParent()
+    {
+        GameObject root = GameObject.Find(RootObjectName);
+        if (root == null)
+        {
+            root = new GameObject(RootObjectName);
+            Undo.RegisterCreatedObjectUndo(root, "Create Map Root");
+        }
+
+        return root.transform;
+    }
+
+    private void ApplyMaterialToSelection()
+    {
+        if (selectedMaterial == null)
+        {
+            Debug.LogWarning("Map Tool: Assign a material preset before applying.");
+            return;
+        }
+
+        foreach (GameObject selectedObject in Selection.gameObjects)
+        {
+            Renderer[] renderers = selectedObject.GetComponentsInChildren<Renderer>();
+
+            foreach (Renderer renderer in renderers)
+            {
+                Undo.RecordObject(renderer, "Apply Material Preset");
+                Material[] materials = renderer.sharedMaterials;
+
+                for (int i = 0; i < materials.Length; i++)
+                {
+                    materials[i] = selectedMaterial;
+                }
+
+                renderer.sharedMaterials = materials;
+                EditorUtility.SetDirty(renderer);
+            }
+        }
+    }
+
+    private void SnapSelectionToGrid()
+    {
+        foreach (Transform selectedTransform in Selection.transforms)
+        {
+            Undo.RecordObject(selectedTransform, "Snap To Grid");
+            selectedTransform.position = SnapToPlacement(selectedTransform.position);
+
+            Vector3 currentEuler = selectedTransform.eulerAngles;
+            float snappedY = Mathf.Round(currentEuler.y / 90.0f) * 90.0f;
+            selectedTransform.rotation = Quaternion.Euler(0.0f, snappedY, 0.0f);
+            EditorUtility.SetDirty(selectedTransform);
+        }
+    }
+
+    private void AddMeshCollidersToSelection()
+    {
+        if (Selection.gameObjects.Length == 0)
+        {
+            Debug.LogWarning("Map Tool: Select one or more objects before adding MeshColliders.");
+            return;
+        }
+
+        int updatedCount = 0;
+
+        foreach (GameObject selectedObject in Selection.gameObjects)
+        {
+            updatedCount += ReplacePrimitiveCollidersWithMeshColliders(selectedObject);
+        }
+
+        Debug.Log($"Map Tool: Updated {updatedCount} MeshCollider component(s).");
+    }
+
+    private int ReplacePrimitiveCollidersWithMeshColliders(GameObject rootObject)
+    {
+        int updatedCount = 0;
+
+        MeshFilter[] meshFilters = rootObject.GetComponentsInChildren<MeshFilter>(true);
+        foreach (MeshFilter meshFilter in meshFilters)
+        {
+            if (meshFilter.sharedMesh == null)
+            {
+                continue;
+            }
+
+            MeshCollider meshCollider = meshFilter.GetComponent<MeshCollider>();
+            if (meshCollider == null)
+            {
+                meshCollider = Undo.AddComponent<MeshCollider>(meshFilter.gameObject);
+            }
+            else
+            {
+                Undo.RecordObject(meshCollider, "Update MeshCollider");
+            }
+
+            RemovePrimitiveColliders(meshFilter.gameObject);
+
+            meshCollider.sharedMesh = null;
+            meshCollider.sharedMesh = meshFilter.sharedMesh;
+            meshCollider.convex = false;
+            EditorUtility.SetDirty(meshCollider);
+            updatedCount++;
+        }
+
+        SkinnedMeshRenderer[] skinnedRenderers = rootObject.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        foreach (SkinnedMeshRenderer skinnedRenderer in skinnedRenderers)
+        {
+            if (skinnedRenderer.sharedMesh == null)
+            {
+                continue;
+            }
+
+            MeshCollider meshCollider = skinnedRenderer.GetComponent<MeshCollider>();
+            if (meshCollider == null)
+            {
+                meshCollider = Undo.AddComponent<MeshCollider>(skinnedRenderer.gameObject);
+            }
+            else
+            {
+                Undo.RecordObject(meshCollider, "Update MeshCollider");
+            }
+
+            RemovePrimitiveColliders(skinnedRenderer.gameObject);
+
+            meshCollider.sharedMesh = null;
+            meshCollider.sharedMesh = skinnedRenderer.sharedMesh;
+            meshCollider.convex = false;
+            EditorUtility.SetDirty(meshCollider);
+            updatedCount++;
+        }
+
+        return updatedCount;
+    }
+
+    private void RemovePrimitiveColliders(GameObject targetObject)
+    {
+        Collider[] colliders = targetObject.GetComponents<Collider>();
+        foreach (Collider collider in colliders)
+        {
+            if (collider is MeshCollider)
+            {
+                continue;
+            }
+
+            Undo.DestroyObjectImmediate(collider);
+        }
+    }
+
+    private void DeleteSelectedObjects()
+    {
+        if (Selection.gameObjects.Length == 0)
+        {
+            return;
+        }
+
+        foreach (GameObject selectedObject in Selection.gameObjects)
+        {
+            Undo.DestroyObjectImmediate(selectedObject);
+        }
+    }
+
+    private void SetSelectedPrefab(GameObject prefab)
+    {
+        if (selectedPrefab == prefab)
+        {
+            return;
+        }
+
+        selectedPrefab = prefab;
+        DestroyPreviewInstance();
+        Repaint();
+    }
+
+    private bool IsCellOccupied(Vector3 targetPosition)
+    {
+        Transform parent = placementParent != null ? placementParent : GameObject.Find(RootObjectName)?.transform;
+        if (parent == null)
+        {
+            return false;
+        }
+
+        const float epsilon = 0.01f;
+
+        foreach (Transform child in parent)
+        {
+            if (Vector3.Distance(child.position, targetPosition) <= epsilon)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
