@@ -6,6 +6,8 @@ public partial class MapToolWindow : EditorWindow
 {
     private void TryPlacePrefab(Vector2 mousePosition, bool isDragPlacement = false)
     {
+        // 실제 배치는 preview와 동일한 계산 경로를 타야
+        // 클릭 직전 화면과 결과물이 어긋나지 않는다.
         if (selectedPrefab == null)
         {
             Debug.LogWarning("Map Tool: Assign a prefab before placing.");
@@ -89,6 +91,8 @@ public partial class MapToolWindow : EditorWindow
 
     private bool TryGetPlacementPosition(Vector2 mousePosition, out Vector3 snappedSurfacePosition, out Vector3 surfaceNormal)
     {
+        // 현재는 support surface를 먼저 고르고,
+        // neighbor / face anchor는 그 다음 단계에서 위치를 보정한다.
         Ray ray = HandleUtility.GUIPointToWorldRay(mousePosition);
 
         if (snapToSurface && TryGetBestSurfaceHit(ray, out RaycastHit hit))
@@ -102,6 +106,22 @@ public partial class MapToolWindow : EditorWindow
             lastSurfaceHit = hit;
             hasLastSurfaceHit = true;
             lastSurfaceHitPoint = hit.point;
+            lastSurfaceNormal = surfaceNormal;
+            return true;
+        }
+
+        if (!snapToSurface && snapToNeighbor && TryGetFrontMostColliderHit(ray, out RaycastHit neighborHit))
+        {
+            // Surface snap을 끈 상태에서 Neighbor Snap을 쓰는 경우엔
+            // height plane이 아니라 "마우스가 실제로 먼저 맞은 face"를 기준점으로 삼는다.
+            // 그래야 옆면에 붙일 때 preview가 뒤 평면으로 밀리지 않는다.
+            snappedSurfacePosition = neighborHit.point;
+            surfaceNormal = neighborHit.normal.normalized;
+            lastHitColliderName = neighborHit.collider != null ? $"{neighborHit.collider.name} [{neighborHit.collider.GetType().Name}]" : "None";
+            lastSurfaceHitCollider = neighborHit.collider;
+            lastSurfaceHit = neighborHit;
+            hasLastSurfaceHit = true;
+            lastSurfaceHitPoint = neighborHit.point;
             lastSurfaceNormal = surfaceNormal;
             return true;
         }
@@ -137,6 +157,8 @@ public partial class MapToolWindow : EditorWindow
 
     private bool TryGetBestSurfaceHit(Ray ray, out RaycastHit bestHit)
     {
+        // "맨 앞의 유효한 윗면"만 support로 쓴다.
+        // 옆면에 붙는 처리는 Surface가 아니라 Neighbor Snap이 담당한다.
         bool previousQueriesHitBackfaces = Physics.queriesHitBackfaces;
         Physics.queriesHitBackfaces = true;
 
@@ -162,7 +184,43 @@ public partial class MapToolWindow : EditorWindow
                 continue;
             }
 
-            if (topSurfaceOnly && hit.normal.y < 0.5f)
+            if (hit.normal.y < 0.5f)
+            {
+                continue;
+            }
+
+            bestHit = hit;
+            return true;
+        }
+
+        bestHit = default;
+        return false;
+    }
+
+    private bool TryGetFrontMostColliderHit(Ray ray, out RaycastHit bestHit)
+    {
+        bool previousQueriesHitBackfaces = Physics.queriesHitBackfaces;
+        Physics.queriesHitBackfaces = true;
+
+        RaycastHit[] hits = Physics.RaycastAll(ray, 500.0f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
+        Physics.queriesHitBackfaces = previousQueriesHitBackfaces;
+
+        if (hits.Length == 0)
+        {
+            bestHit = default;
+            return false;
+        }
+
+        System.Array.Sort(hits, (lhs, rhs) => lhs.distance.CompareTo(rhs.distance));
+
+        foreach (RaycastHit hit in hits)
+        {
+            if (hit.collider == null)
+            {
+                continue;
+            }
+
+            if (previewInstance != null && hit.collider.transform.IsChildOf(previewInstance.transform))
             {
                 continue;
             }
@@ -207,6 +265,8 @@ public partial class MapToolWindow : EditorWindow
 
     private Vector3 GetAlignedPreviewPosition(Vector3 surfacePosition, Quaternion placementRotation, Vector3 surfaceNormal)
     {
+        // preview mesh의 실제 바닥/접촉면이 surface에 닿도록 normal 방향 offset을 계산한다.
+        // 중심점만 맞추면 긴 메쉬나 회전된 메쉬가 공중에 뜨는 문제가 생긴다.
         EnsurePreviewInstance();
         if (previewInstance == null)
         {
@@ -228,6 +288,8 @@ public partial class MapToolWindow : EditorWindow
 
     private float GetNearestFaceOffsetAlongNormal(List<Vector3> worldPoints, Vector3 origin, Vector3 normal)
     {
+        // 주어진 normal 방향에서 preview의 가장 "먼저 닿는 점"을 찾는다.
+        // Face Anchor와 Surface Snap 둘 다 결국 이 offset 계산에 기대고 있다.
         float minProjection = float.PositiveInfinity;
 
         foreach (Vector3 point in worldPoints)

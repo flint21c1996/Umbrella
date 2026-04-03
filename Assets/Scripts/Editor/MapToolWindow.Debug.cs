@@ -6,6 +6,8 @@ public partial class MapToolWindow : EditorWindow
 {
     private void DrawMeshColliderBounds()
     {
+        // 디버그 드로잉은 "무엇을 맞고 있는지"와 "어떤 face를 anchor로 보는지"를
+        // 눈으로 바로 확인하게 해주는 용도다.
         bool drewCurrentHitCollider = false;
 
         if (previewInstance != null)
@@ -59,6 +61,7 @@ public partial class MapToolWindow : EditorWindow
 
     private void DrawPlacementDebugLines()
     {
+        // Surface / Face Anchor 계산이 어느 축 기준으로 돌아가는지 시각화한다.
         if (previewInstance == null || !previewInstance.activeInHierarchy)
         {
             return;
@@ -114,6 +117,8 @@ public partial class MapToolWindow : EditorWindow
 
     private void DrawHoveredFaceAnchor()
     {
+        // 현재 anchor로 선택된 coplanar face polygon을 그대로 보여준다.
+        // triangle 하나가 아니라 "면 전체"가 잡혔는지 확인하는 데 중요하다.
         if (!hasHoveredFaceAnchor || hoveredFaceCollider == null || hoveredFacePoints.Count < 3)
         {
             return;

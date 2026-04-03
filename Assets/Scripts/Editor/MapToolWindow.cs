@@ -9,7 +9,6 @@ public partial class MapToolWindow : EditorWindow
     private enum NeighborSnapMode
     {
         Face,
-        FaceExact,
         Edge,
         Vertex
     }
@@ -33,7 +32,6 @@ public partial class MapToolWindow : EditorWindow
     private bool snapToSurface = true;
     private bool snapToGrid = true;
     private bool snapToNeighbor;
-    private bool topSurfaceOnly = true;
     private bool alignToSurfaceNormal;
     private bool autoAlignToNeighbor = true;
     private bool showMeshColliderBounds;
@@ -85,6 +83,8 @@ public partial class MapToolWindow : EditorWindow
 
     private void OnGUI()
     {
+        // 자주 쓰는 블록 prefab은 상단에서 바로 갈아끼우고,
+        // 실제 배치 파라미터는 아래 섹션에서 조절하는 흐름으로 구성했다.
         EditorGUILayout.LabelField("프리팹 프리셋", EditorStyles.boldLabel);
         floorPrefab = (GameObject)EditorGUILayout.ObjectField(
             new GUIContent("Floor", "자주 쓰는 바닥용 Floor prefab을 미리 등록합니다."),
@@ -145,11 +145,10 @@ public partial class MapToolWindow : EditorWindow
         gridSize = Mathf.Max(0.1f, EditorGUILayout.FloatField(new GUIContent("Grid Size", "배치 위치를 맞출 grid 한 칸의 크기입니다."), gridSize));
         heightStep = Mathf.Max(0.1f, EditorGUILayout.FloatField(new GUIContent("Height Step", "Height Level이 1 증가할 때 올라가는 높이값입니다."), heightStep));
         heightLevel = EditorGUILayout.IntField(new GUIContent("Height Level", "현재 배치 높이 단계입니다. [ / ] 키로도 조절할 수 있습니다."), heightLevel);
-        snapToSurface = EditorGUILayout.Toggle(new GUIContent("Snap To Surface", "클릭한 collider 표면에 prefab 바닥면이 닿도록 배치합니다."), snapToSurface);
-        topSurfaceOnly = EditorGUILayout.Toggle(new GUIContent("Top Surface Only", "위를 향한 면만 배치 surface로 사용합니다. 옆면이나 아랫면은 무시합니다."), topSurfaceOnly);
+        snapToSurface = EditorGUILayout.Toggle(new GUIContent("Snap To Surface", "클릭한 collider의 윗면(top surface)을 support로 사용해 prefab 바닥면이 닿도록 배치합니다."), snapToSurface);
         snapToNeighbor = EditorGUILayout.Toggle(new GUIContent("Snap To Neighbor", "주변 collider의 face, edge, vertex 기준으로 prefab을 붙입니다."), snapToNeighbor);
         neighborSnapMode = (NeighborSnapMode)EditorGUILayout.EnumPopup(
-            new GUIContent("Neighbor Snap Mode", "Face, FaceExact, Edge, Vertex 중 어떤 기준으로 붙일지 정합니다."),
+            new GUIContent("Neighbor Snap Mode", "Face, Edge, Vertex 중 어떤 기준으로 붙일지 정합니다."),
             neighborSnapMode
         );
         neighborSnapDistance = Mathf.Max(
@@ -164,6 +163,8 @@ public partial class MapToolWindow : EditorWindow
         showAdvancedPlacementOptions = EditorGUILayout.Foldout(showAdvancedPlacementOptions, "고급 옵션 (Advanced)", true);
         if (showAdvancedPlacementOptions)
         {
+            // 기본 사용 흐름에는 꼭 필요하지 않은 옵션만 foldout 안으로 넣어
+            // 맵을 찍을 때의 시각적 복잡도를 줄였다.
             EditorGUI.indentLevel++;
             alignToSurfaceNormal = EditorGUILayout.Toggle(new GUIContent("Align To Surface Normal", "surface normal 방향으로 prefab을 기울입니다. 끄면 회전은 월드 기준을 유지합니다."), alignToSurfaceNormal);
             snapToGrid = EditorGUILayout.Toggle(new GUIContent("Snap To Grid", "배치 위치의 X/Z 좌표를 grid에 맞춰 정렬합니다."), snapToGrid);
@@ -275,6 +276,8 @@ public partial class MapToolWindow : EditorWindow
 
         EditorGUILayout.Space(6.0f);
         EditorGUILayout.LabelField("상태", EditorStyles.boldLabel);
+        // 디버그용 상태값은 지금 배치 계산이 무엇을 기준으로 굴러가는지
+        // 빠르게 확인할 수 있게 최소 정보만 노출한다.
         EditorGUILayout.LabelField("Height Offset", GetCurrentHeight().ToString("F2"));
         EditorGUILayout.LabelField("Current Rotation", $"{currentRotationDegrees:F1}도");
         EditorGUILayout.LabelField("Preview Occupied", lastPreviewOccupied ? "사용 중" : "비어 있음");

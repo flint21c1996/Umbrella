@@ -6,6 +6,8 @@ public partial class MapToolWindow : EditorWindow
 {
     private void OnSceneGUI(SceneView sceneView)
     {
+        // SceneView 안에서 preview, placement, delete를 모두 처리하는 메인 루프.
+        // Update가 아니라 에디터 이벤트 기반이라 MouseMove / MouseDown 타이밍을 직접 챙긴다.
         if (!placementEnabled)
         {
             UpdatePreviewVisibility(false);
@@ -166,6 +168,7 @@ public partial class MapToolWindow : EditorWindow
         Vector3 snappedPosition = GetAlignedPreviewPosition(surfacePosition, placementRotation, surfaceNormal);
         if (useNeighborSnap)
         {
+            // support surface 위에 올린 뒤, 필요하면 주변 메쉬 face 기준으로 한 번 더 붙인다.
             GetNeighborSnappedTransform(snappedPosition, placementRotation, out snappedPosition, out placementRotation);
         }
         else
@@ -199,6 +202,8 @@ public partial class MapToolWindow : EditorWindow
 
     private void DrawGrid(Vector3 centerPosition, Quaternion placementRotation)
     {
+        // 단순 월드 그리드가 아니라 현재 preview 회전에 맞춘 local grid를 그려서
+        // 기울어진 배치에서도 "이번 셀" 감각이 유지되도록 했다.
         Vector3 rightAxis = placementRotation * Vector3.right;
         Vector3 forwardAxis = placementRotation * Vector3.forward;
         int radius = previewGridRadius;

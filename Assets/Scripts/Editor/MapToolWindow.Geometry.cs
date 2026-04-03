@@ -55,6 +55,8 @@ public partial class MapToolWindow : EditorWindow
 
     private bool TryCollectPreviewWorldPoints(List<Vector3> points, out Vector3 center, out float radius)
     {
+        // preview 전체를 대표하는 point cloud를 만든다.
+        // snap 탐색 반경, normal offset, fallback 계산이 이 데이터를 공유한다.
         points.Clear();
 
         MeshFilter[] meshFilters = previewInstance.GetComponentsInChildren<MeshFilter>(true);

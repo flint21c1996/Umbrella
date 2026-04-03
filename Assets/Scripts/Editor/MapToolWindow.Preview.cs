@@ -6,6 +6,8 @@ public partial class MapToolWindow : EditorWindow
 {
     private void EnsurePreviewInstance()
     {
+        // preview는 실제 prefab 인스턴스를 재사용하는 편이
+        // 배치 결과와 시각적으로 가장 덜 어긋난다.
         if (previewInstance != null)
         {
             if (previewInstance.name != $"{selectedPrefab.name}_Preview")
@@ -107,6 +109,7 @@ public partial class MapToolWindow : EditorWindow
 
     private void UpdatePreviewMaterial(bool occupied)
     {
+        // 점유 상태만 색으로 바꾸고, material 자체는 하나를 공유해서 preview 비용을 줄인다.
         EnsurePreviewMaterial();
         EnsurePreviewInstance();
 
@@ -136,6 +139,8 @@ public partial class MapToolWindow : EditorWindow
 
     private void EnsurePreviewMaterial()
     {
+        // URP Lit 우선, 없으면 Standard로 fallback.
+        // preview는 알파만 필요한 단순 transparent material이면 충분하다.
         if (previewMaterial != null)
         {
             return;
