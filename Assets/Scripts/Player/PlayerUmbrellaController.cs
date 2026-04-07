@@ -1,11 +1,11 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 
 public class PlayerUmbrellaController : MonoBehaviour
 {
-    // 우산은 단일 도구이지만 상태에 따라 전혀 다른 환경 문법으로 확장된다.
-    // 처음 버전에서는 기획서의 핵심 루프인 펼치기, 뒤집기, 붓기만 검증할 수 있게
-    // 최소 상태만 enum으로 고정했다.
+    // 우산 시스템은 이동과 별도로 관리한다.
+    // 이동 입력과 우산 상태가 섞이기 시작하면 이후 활공, 차단, 상호작용 확장이 어려워지기 때문이다.
     public enum UmbrellaState
     {
         Closed,
@@ -14,41 +14,52 @@ public class PlayerUmbrellaController : MonoBehaviour
         Pouring
     }
 
+    [Header("Ownership")]
+    // 테스트를 빠르게 하고 싶을 때를 대비해 시작 시 우산 소유 여부를 선택할 수 있게 둔다.
+    public bool startWithUmbrella;
+    // 바닥에서 주운 우산을 플레이어 쪽에 붙일 기준점이다.
+    public Transform pickupAttachPoint;
+
     [Header("Input")]
-    // 이동과 분리된 별도 입력으로 두어, 우산 로직이 PlayerMovement와 섞이지 않게 한다.
     public InputActionReference toggleUmbrellaAction;
     public InputActionReference invertUmbrellaAction;
     public InputActionReference pourAction;
+    // Input Action을 아직 연결하지 않아도 바로 테스트할 수 있도록 임시 키 입력을 둔다.
+    public bool useKeyboardFallback = true;
 
     [Header("Visual")]
-    // 초기에 애니메이션 없이도 상태를 바로 확인할 수 있도록
-    // 열림, 닫힘, 뒤집힘 비주얼을 각각 따로 두고 활성화만 전환한다.
+    // 초기 단계에서는 애니메이션 대신 상태별 오브젝트를 켜고 끄는 방식으로 흐름을 검증한다.
     public GameObject closedVisual;
     public GameObject openVisual;
     public GameObject invertedVisual;
     public Transform pourOrigin;
 
     [Header("Water")]
-    // 비 시스템은 이후 빛, 바람, 생장으로 확장될 공통 구조를 염두에 두고
-    // 저장량과 방출량을 먼저 분리했다.
+    // 비를 받아 저장하고, 이후 특정 대상에게 붓는 가장 작은 루프를 먼저 만든다.
     public float maxStoredWater = 5.0f;
     public float pourRate = 1.5f;
     public float pourDistance = 3.0f;
     public LayerMask pourMask = ~0;
 
     [Header("Debug")]
+    [SerializeField] private bool hasUmbrella;
     [SerializeField] private UmbrellaState currentState = UmbrellaState.Closed;
     [SerializeField] private float currentStoredWater;
+    [SerializeField] private GameObject runtimePickupVisual;
 
+    public bool HasUmbrella => hasUmbrella;
     public UmbrellaState CurrentState => currentState;
     public float CurrentStoredWater => currentStoredWater;
-    public bool IsOpen => currentState == UmbrellaState.Open;
-    public bool IsInverted => currentState == UmbrellaState.Inverted;
-    public bool IsPouring => currentState == UmbrellaState.Pouring;
-    public bool CanCollectWater => currentState == UmbrellaState.Inverted;
+    public bool IsOpen => hasUmbrella && currentState == UmbrellaState.Open;
+    public bool IsInverted => hasUmbrella && currentState == UmbrellaState.Inverted;
+    public bool IsPouring => hasUmbrella && currentState == UmbrellaState.Pouring;
+    public bool CanCollectWater => hasUmbrella && currentState == UmbrellaState.Inverted;
 
     private void Start()
     {
+        hasUmbrella = startWithUmbrella;
+        currentState = UmbrellaState.Closed;
+        currentStoredWater = Mathf.Clamp(currentStoredWater, 0.0f, maxStoredWater);
         RefreshVisuals();
     }
 
@@ -68,14 +79,57 @@ public class PlayerUmbrellaController : MonoBehaviour
 
     private void Update()
     {
+        // 우산을 얻기 전에는 시스템은 붙어 있어도 입력과 상호작용을 잠가둔다.
+        if (!hasUmbrella)
+        {
+            return;
+        }
+
         HandleStateInput();
         UpdatePouring();
     }
 
+    public void AcquireUmbrella()
+    {
+        AcquireUmbrella(null);
+    }
+
+    public void AcquireUmbrella(GameObject pickedVisual)
+    {
+        if (hasUmbrella)
+        {
+            return;
+        }
+
+        hasUmbrella = true;
+        currentState = UmbrellaState.Closed;
+        currentStoredWater = 0.0f;
+
+        if (pickedVisual != null)
+        {
+            AttachPickupVisual(pickedVisual);
+        }
+
+        RefreshVisuals();
+    }
+
+    public void RemoveUmbrella()
+    {
+        if (!hasUmbrella)
+        {
+            return;
+        }
+
+        hasUmbrella = false;
+        currentState = UmbrellaState.Closed;
+        currentStoredWater = 0.0f;
+        runtimePickupVisual = null;
+        RefreshVisuals();
+    }
+
     public void AddWater(float amount)
     {
-        // 현재는 뒤집힌 상태일 때만 물을 받을 수 있게 제한해
-        // 우산 상태 선택 자체가 퍼즐 입력으로 기능하게 한다.
+        // 뒤집힌 상태에서만 물을 받게 만들어, 상태 선택 자체가 곧 플레이 문법이 되도록 한다.
         if (!CanCollectWater || amount <= 0.0f)
         {
             return;
@@ -86,22 +140,27 @@ public class PlayerUmbrellaController : MonoBehaviour
 
     private void HandleStateInput()
     {
-        if (toggleUmbrellaAction != null && toggleUmbrellaAction.action.WasPressedThisFrame())
+        bool togglePressed = WasUmbrellaActionPressed(toggleUmbrellaAction, Keyboard.current?.fKey);
+        bool invertPressed = WasUmbrellaActionPressed(invertUmbrellaAction, Keyboard.current?.gKey);
+        bool pourPressed = WasUmbrellaActionPressed(pourAction, Mouse.current?.rightButton);
+        bool pourReleased = WasUmbrellaActionReleased(pourAction, Mouse.current?.rightButton);
+
+        if (togglePressed)
         {
             ToggleOpenState();
         }
 
-        if (invertUmbrellaAction != null && invertUmbrellaAction.action.WasPressedThisFrame())
+        if (invertPressed)
         {
             ToggleInvertState();
         }
 
-        if (pourAction != null && pourAction.action.WasPressedThisFrame())
+        if (pourPressed)
         {
             BeginPour();
         }
 
-        if (pourAction != null && pourAction.action.WasReleasedThisFrame())
+        if (pourReleased)
         {
             EndPour();
         }
@@ -109,8 +168,8 @@ public class PlayerUmbrellaController : MonoBehaviour
 
     private void ToggleOpenState()
     {
-        // 펼치기 입력은 현재 상태를 기준으로 가장 자연스러운 기본 상태로 되돌린다.
-        // 뒤집기나 붓기 중에도 다시 일반 우산 상태로 복귀할 수 있게 한다.
+        // 열린 상태와 닫힌 상태는 가장 자주 오가는 기본 상태다.
+        // 붓기나 뒤집기 도중에도 한 번에 열린 상태로 복귀할 수 있게 둔다.
         switch (currentState)
         {
             case UmbrellaState.Closed:
@@ -130,8 +189,8 @@ public class PlayerUmbrellaController : MonoBehaviour
 
     private void ToggleInvertState()
     {
-        // 뒤집기는 물을 저장하는 전용 상태로 본다.
-        // 따라서 붓는 중에 다시 누르면 먼저 붓기를 종료하고 저장 상태로 되돌린다.
+        // 뒤집기는 저장용 상태로 두고, 다시 누르면 닫힌 상태로 돌아가게 한다.
+        // 붓는 중이라면 먼저 붓기를 종료하고 뒤집힌 상태를 유지한다.
         switch (currentState)
         {
             case UmbrellaState.Inverted:
@@ -150,8 +209,7 @@ public class PlayerUmbrellaController : MonoBehaviour
 
     private void BeginPour()
     {
-        // 지금 버전에서는 저장한 물이 있을 때만 붓기를 허용한다.
-        // 물의 유무 자체가 퍼즐 진행 조건으로 보이게 하기 위한 처리다.
+        // 지금 단계에서는 저장한 물이 있고, 뒤집힌 상태일 때만 붓기를 허용한다.
         if (currentStoredWater <= 0.0f)
         {
             return;
@@ -182,8 +240,7 @@ public class PlayerUmbrellaController : MonoBehaviour
             return;
         }
 
-        // 붓는 동안은 저장량을 계속 줄이고,
-        // 정면의 간단한 타깃 오브젝트에만 물을 전달하는 최소 루프부터 검증한다.
+        // 붓는 동안에는 저장량을 줄이고, 앞쪽에 있는 간단한 대상에게만 물을 전달한다.
         float pourAmount = pourRate * Time.deltaTime;
         currentStoredWater = Mathf.Max(0.0f, currentStoredWater - pourAmount);
 
@@ -228,11 +285,29 @@ public class PlayerUmbrellaController : MonoBehaviour
 
     private void RefreshVisuals()
     {
-        // 초기 프로토타입에서는 상태 확인이 가장 중요하므로
-        // 실제 애니메이션 대신 활성화 전환으로 즉시 피드백을 준다.
-        SetVisualActive(closedVisual, currentState == UmbrellaState.Closed);
-        SetVisualActive(openVisual, currentState == UmbrellaState.Open || currentState == UmbrellaState.Pouring);
-        SetVisualActive(invertedVisual, currentState == UmbrellaState.Inverted);
+        // 우산을 얻기 전에는 플레이어 손에 어떤 우산도 보이지 않게 한다.
+        if (!hasUmbrella)
+        {
+            SetVisualActive(closedVisual, false);
+            SetVisualActive(openVisual, false);
+            SetVisualActive(invertedVisual, false);
+            SetVisualActive(runtimePickupVisual, false);
+            return;
+        }
+
+        bool hasDedicatedVisuals = closedVisual != null || openVisual != null || invertedVisual != null;
+
+        if (hasDedicatedVisuals)
+        {
+            SetVisualActive(closedVisual, currentState == UmbrellaState.Closed);
+            SetVisualActive(openVisual, currentState == UmbrellaState.Open || currentState == UmbrellaState.Pouring);
+            SetVisualActive(invertedVisual, currentState == UmbrellaState.Inverted);
+            SetVisualActive(runtimePickupVisual, false);
+            return;
+        }
+
+        // 전용 상태 비주얼을 아직 만들지 않았다면, 주운 우산 오브젝트 하나를 계속 보여준다.
+        SetVisualActive(runtimePickupVisual, true);
     }
 
     private void SetVisualActive(GameObject target, bool active)
@@ -267,6 +342,11 @@ public class PlayerUmbrellaController : MonoBehaviour
 
     private void OnDrawGizmosSelected()
     {
+        if (!hasUmbrella)
+        {
+            return;
+        }
+
         if (!TryGetPourRay(out Ray pourRay))
         {
             return;
@@ -274,5 +354,47 @@ public class PlayerUmbrellaController : MonoBehaviour
 
         Gizmos.color = IsPouring ? Color.cyan : Color.yellow;
         Gizmos.DrawLine(pourRay.origin, pourRay.origin + pourRay.direction * pourDistance);
+    }
+
+    private void AttachPickupVisual(GameObject pickedVisual)
+    {
+        runtimePickupVisual = pickedVisual;
+
+        Transform targetParent = pickupAttachPoint != null ? pickupAttachPoint : transform;
+        runtimePickupVisual.transform.SetParent(targetParent, false);
+        runtimePickupVisual.transform.localPosition = Vector3.zero;
+        runtimePickupVisual.transform.localRotation = Quaternion.identity;
+
+        foreach (Collider collider in runtimePickupVisual.GetComponentsInChildren<Collider>(true))
+        {
+            collider.enabled = false;
+        }
+
+        foreach (Rigidbody rigidbodyComponent in runtimePickupVisual.GetComponentsInChildren<Rigidbody>(true))
+        {
+            rigidbodyComponent.isKinematic = true;
+            rigidbodyComponent.linearVelocity = Vector3.zero;
+            rigidbodyComponent.angularVelocity = Vector3.zero;
+        }
+    }
+
+    private bool WasUmbrellaActionPressed(InputActionReference actionReference, ButtonControl fallbackButton)
+    {
+        if (actionReference != null && actionReference.action.WasPressedThisFrame())
+        {
+            return true;
+        }
+
+        return useKeyboardFallback && fallbackButton != null && fallbackButton.wasPressedThisFrame;
+    }
+
+    private bool WasUmbrellaActionReleased(InputActionReference actionReference, ButtonControl fallbackButton)
+    {
+        if (actionReference != null && actionReference.action.WasReleasedThisFrame())
+        {
+            return true;
+        }
+
+        return useKeyboardFallback && fallbackButton != null && fallbackButton.wasReleasedThisFrame;
     }
 }
