@@ -6,6 +6,8 @@ public partial class MapToolWindow : EditorWindow
 {
     private Transform GetOrCreateRootParent()
     {
+        // 루트 부모를 고정해두면 Map Tool이 배치한 결과물만 한곳에 모여
+        // 선택, 삭제, 점유 검사 흐름을 단순하게 유지할 수 있다.
         GameObject root = GameObject.Find(RootObjectName);
         if (root == null)
         {
@@ -18,6 +20,8 @@ public partial class MapToolWindow : EditorWindow
 
     private void ApplyMaterialToSelection()
     {
+        // 블록아웃 단계에서는 배치 직후 material을 여러 개 한 번에 갈아끼우는 일이 잦다.
+        // 그래서 배치 툴 안에서 바로 material preset 적용까지 처리한다.
         if (selectedMaterial == null)
         {
             Debug.LogWarning("Map Tool: Assign a material preset before applying.");
@@ -46,6 +50,8 @@ public partial class MapToolWindow : EditorWindow
 
     private void SnapSelectionToGrid()
     {
+        // 이미 배치한 오브젝트도 grid 규칙으로 다시 정리할 수 있어야
+        // 손으로 만지다가 흐트러진 블록아웃을 빠르게 복구할 수 있다.
         foreach (Transform selectedTransform in Selection.transforms)
         {
             Undo.RecordObject(selectedTransform, "Snap To Grid");
@@ -60,6 +66,8 @@ public partial class MapToolWindow : EditorWindow
 
     private void AddMeshCollidersToSelection()
     {
+        // Mesh 기반 face anchor를 쓰려면 primitive collider보다 MeshCollider 쪽이
+        // 실제 배치 결과와 훨씬 덜 어긋난다.
         if (Selection.gameObjects.Length == 0)
         {
             Debug.LogWarning("Map Tool: Select one or more objects before adding MeshColliders.");
@@ -141,6 +149,8 @@ public partial class MapToolWindow : EditorWindow
 
     private void RemovePrimitiveColliders(GameObject targetObject)
     {
+        // MeshCollider와 primitive collider가 같이 있으면 hit 결과가 섞여서
+        // "무엇을 맞고 있는지" 예측하기 어려워진다.
         Collider[] colliders = targetObject.GetComponents<Collider>();
         foreach (Collider collider in colliders)
         {
@@ -155,6 +165,8 @@ public partial class MapToolWindow : EditorWindow
 
     private void DeleteSelectedObjects()
     {
+        // 배치 모드에서는 즉시 지우는 흐름이 더 중요하므로
+        // selection 삭제도 별도 액션으로 유지한다.
         if (Selection.gameObjects.Length == 0)
         {
             return;
@@ -173,6 +185,8 @@ public partial class MapToolWindow : EditorWindow
             return;
         }
 
+        // preview는 prefab별로 인스턴스를 재사용하므로,
+        // 선택 prefab이 바뀌면 기존 preview를 정리하고 다시 만든다.
         selectedPrefab = prefab;
         DestroyPreviewInstance();
         Repaint();

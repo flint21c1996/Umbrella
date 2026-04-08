@@ -6,6 +6,8 @@ public partial class MapToolWindow : EditorWindow
 {
     private bool TryStoreHoveredFaceAnchor(MeshCollider meshCollider, RaycastHit hit)
     {
+        // triangle 하나만 저장하면 "면 전체"가 아니라 삼각형 한 장만 잡힌다.
+        // 그래서 같은 plane에 있는 coplanar triangle을 묶어서 anchor face로 확장한다.
         if (meshCollider.sharedMesh == null || hit.triangleIndex < 0)
         {
             return false;
@@ -87,6 +89,7 @@ public partial class MapToolWindow : EditorWindow
 
     private void AddUniqueFacePoint(List<Vector3> points, Vector3 point, float tolerance)
     {
+        // coplanar triangle을 모을 때 동일 vertex가 여러 번 들어오는 것을 막는다.
         float sqrTolerance = tolerance * tolerance;
         foreach (Vector3 existingPoint in points)
         {
@@ -101,6 +104,8 @@ public partial class MapToolWindow : EditorWindow
 
     private bool TryGetHoveredFacePlaneAxes(out Vector3 primaryAxis, out Vector3 secondaryAxis)
     {
+        // hovered face polygon의 가장 긴 edge를 primary axis로 보고,
+        // 나머지 면 내 정렬은 secondary axis로 처리한다.
         primaryAxis = Vector3.zero;
         secondaryAxis = Vector3.zero;
 
@@ -139,6 +144,8 @@ public partial class MapToolWindow : EditorWindow
 
     private List<Vector3> GetOrderedFacePoints(List<Vector3> points, Vector3 center, Vector3 normal)
     {
+        // Convex polygon을 그리거나 edge를 순회하려면 점 순서가 필요하다.
+        // face plane 위에서 극각 정렬로 순서를 맞춘다.
         Vector3 basisX = Vector3.ProjectOnPlane(Vector3.right, normal);
         if (basisX.sqrMagnitude <= 0.000001f)
         {
@@ -163,6 +170,8 @@ public partial class MapToolWindow : EditorWindow
 
     private bool TryCollectPreviewContactFacePoints(Vector3 planePoint, Vector3 planeNormal, out List<Vector3> facePoints)
     {
+        // support face에 실제로 닿게 될 preview 쪽 면을 추정한다.
+        // 성공하면 "preview contact face vs hovered face" 정렬이 가능해진다.
         facePoints = new List<Vector3>();
         if (previewInstance == null)
         {
@@ -224,6 +233,8 @@ public partial class MapToolWindow : EditorWindow
 
     private bool IsSupportFaceTooLargeForAnchor(List<Vector3> previewFacePoints, List<Vector3> supportFacePoints, Vector3 faceNormal)
     {
+        // 맨바닥 Plane처럼 너무 큰 면을 무조건 anchor로 쓰면
+        // support가 과하게 강해져 neighbor face 의도가 죽는다.
         if (previewFacePoints.Count < 3 || supportFacePoints.Count < 3)
         {
             return false;
@@ -251,6 +262,8 @@ public partial class MapToolWindow : EditorWindow
 
     private bool TryGetFacePlaneAxes(List<Vector3> facePoints, Vector3 normal, out Vector3 primaryAxis, out Vector3 secondaryAxis)
     {
+        // hovered face뿐 아니라 preview contact face 쪽에서도
+        // 동일한 기준축을 뽑기 위해 공통 helper로 분리했다.
         primaryAxis = Vector3.zero;
         secondaryAxis = Vector3.zero;
 
@@ -296,6 +309,8 @@ public partial class MapToolWindow : EditorWindow
         out List<Vector3> facePoints,
         out float faceScore)
     {
+        // preview 메쉬에서 plane normal과 가장 잘 마주보는 face를 찾고,
+        // 그 face와 같은 plane에 있는 삼각형들을 contact face로 묶는다.
         facePoints = null;
         faceScore = float.PositiveInfinity;
 

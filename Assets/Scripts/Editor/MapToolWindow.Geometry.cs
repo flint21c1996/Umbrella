@@ -6,6 +6,7 @@ public partial class MapToolWindow : EditorWindow
 {
     private Vector3[] GetBoundsCorners(Bounds bounds)
     {
+        // Gizmo나 fallback debug에서 공통으로 쓰는 기본 bounds corner 계산.
         Vector3 min = bounds.min;
         Vector3 max = bounds.max;
 
@@ -24,6 +25,8 @@ public partial class MapToolWindow : EditorWindow
 
     private Vector3[] GetBoxColliderLocalCorners(BoxCollider boxCollider)
     {
+        // BoxCollider는 center/size 기준이라,
+        // 월드 변환 전에 local corner를 명시적으로 복원해둔다.
         Vector3 halfSize = boxCollider.size * 0.5f;
         Vector3 center = boxCollider.center;
 
@@ -42,6 +45,7 @@ public partial class MapToolWindow : EditorWindow
 
     private Vector3[] GetTransformedBoundsCorners(Bounds localBounds, Matrix4x4 localToWorld)
     {
+        // local bounds를 world wireframe으로 그릴 때 쓰는 공통 변환 경로.
         Vector3[] localCorners = GetBoundsCorners(localBounds);
         Vector3[] worldCorners = new Vector3[localCorners.Length];
 
@@ -99,6 +103,7 @@ public partial class MapToolWindow : EditorWindow
 
     private Vector3 GetPointAverage(List<Vector3> points)
     {
+        // preview / face polygon / debug 중심점 계산을 모두 같은 규칙으로 맞춘다.
         Vector3 sum = Vector3.zero;
         foreach (Vector3 point in points)
         {
@@ -110,6 +115,7 @@ public partial class MapToolWindow : EditorWindow
 
     private float GetMaxDistanceFromPoint(List<Vector3> points, Vector3 origin)
     {
+        // point cloud를 단순 bounding sphere처럼 다룰 때 필요한 반경 근사값.
         float maxDistance = 0.0f;
         foreach (Vector3 point in points)
         {
