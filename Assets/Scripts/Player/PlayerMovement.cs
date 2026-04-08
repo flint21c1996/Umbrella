@@ -6,6 +6,9 @@ public class PlayerMovement : MonoBehaviour
     // 이동 속도
     public float moveSpeed = 5.0f;
 
+    // 이동 방향을 바라보는 회전 속도
+    public float turnSpeed = 720.0f;
+
     // 점프 힘
     public float jumpForce = 5.0f;
 
@@ -117,6 +120,25 @@ public class PlayerMovement : MonoBehaviour
         velocity.z = moveDirection.z * moveSpeed;
         rb.linearVelocity = velocity;
 
+        RotateTowardsMoveDirection(moveDirection);
+
+    }
+
+    void RotateTowardsMoveDirection(Vector3 moveDirection)
+    {
+        if (moveDirection.sqrMagnitude < 0.0001f)
+        {
+            return;
+        }
+
+        Quaternion targetRotation = Quaternion.LookRotation(moveDirection, Vector3.up);
+        Quaternion nextRotation = Quaternion.RotateTowards(
+            rb.rotation,
+            targetRotation,
+            turnSpeed * Time.fixedDeltaTime
+        );
+
+        rb.MoveRotation(nextRotation);
     }
 
     void OnCollisionStay(Collision collision)

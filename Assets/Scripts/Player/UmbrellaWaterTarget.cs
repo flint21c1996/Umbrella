@@ -3,7 +3,7 @@ using UnityEngine;
 public class UmbrellaWaterTarget : MonoBehaviour
 {
     // 물을 받았을 때 실제 반응이 일어나는지를 빠르게 확인하기 위한 최소 타깃이다.
-    public float requiredWater = 2.0f;
+    public float requiredWater = 0.5f;
     public Renderer targetRenderer;
     public Color idleColor = Color.gray;
     public Color activatedColor = Color.green;
@@ -13,8 +13,21 @@ public class UmbrellaWaterTarget : MonoBehaviour
 
     public bool IsActivated => isActivated;
 
+    private void Reset()
+    {
+        if (targetRenderer == null)
+        {
+            targetRenderer = GetComponentInChildren<Renderer>();
+        }
+    }
+
     private void Start()
     {
+        if (targetRenderer == null)
+        {
+            targetRenderer = GetComponentInChildren<Renderer>();
+        }
+
         RefreshVisual();
     }
 
@@ -44,6 +57,17 @@ public class UmbrellaWaterTarget : MonoBehaviour
         }
 
         Material material = targetRenderer.material;
-        material.color = isActivated ? activatedColor : idleColor;
+        Color targetColor = isActivated ? activatedColor : idleColor;
+
+        if (material.HasProperty("_BaseColor"))
+        {
+            material.SetColor("_BaseColor", targetColor);
+            return;
+        }
+
+        if (material.HasProperty("_Color"))
+        {
+            material.color = targetColor;
+        }
     }
 }

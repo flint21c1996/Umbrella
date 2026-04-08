@@ -41,11 +41,22 @@ public class PlayerUmbrellaController : MonoBehaviour
     public float pourDistance = 3.0f;
     public LayerMask pourMask = ~0;
 
+    [Header("Debug Controls")]
+    // 비 구역이 아직 준비되지 않았을 때도 붓기 루프를 바로 확인할 수 있도록 임시 충전 키를 둔다.
+    public bool enableDebugFillKey = true;
+    public float debugFillAmount = 1.0f;
+
     [Header("Debug")]
     [SerializeField] private bool hasUmbrella;
     [SerializeField] private UmbrellaState currentState = UmbrellaState.Closed;
     [SerializeField] private float currentStoredWater;
     [SerializeField] private GameObject runtimePickupVisual;
+    [SerializeField] private string lastPourHitColliderName;
+    [SerializeField] private string lastPourTargetName;
+    [SerializeField] private bool hasLastPourRay;
+    [SerializeField] private Vector3 lastPourRayOrigin;
+    [SerializeField] private Vector3 lastPourRayDirection;
+    [SerializeField] private float lastPourDebugTimeRemaining;
 
     public bool HasUmbrella => hasUmbrella;
     public UmbrellaState CurrentState => currentState;
@@ -144,6 +155,7 @@ public class PlayerUmbrellaController : MonoBehaviour
         bool invertPressed = WasUmbrellaActionPressed(invertUmbrellaAction, Keyboard.current?.gKey);
         bool pourPressed = WasUmbrellaActionPressed(pourAction, Mouse.current?.rightButton);
         bool pourReleased = WasUmbrellaActionReleased(pourAction, Mouse.current?.rightButton);
+        bool debugFillPressed = enableDebugFillKey && Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame;
 
         if (togglePressed)
         {
@@ -163,6 +175,11 @@ public class PlayerUmbrellaController : MonoBehaviour
         if (pourReleased)
         {
             EndPour();
+        }
+
+        if (debugFillPressed)
+        {
+            currentStoredWater = Mathf.Clamp(currentStoredWater + debugFillAmount, 0.0f, maxStoredWater);
         }
     }
 
@@ -243,12 +260,51 @@ public class PlayerUmbrellaController : MonoBehaviour
         // 붓는 동안에는 저장량을 줄이고, 앞쪽에 있는 간단한 대상에게만 물을 전달한다.
         float pourAmount = pourRate * Time.deltaTime;
         currentStoredWater = Mathf.Max(0.0f, currentStoredWater - pourAmount);
+        lastPourHitColliderName = "No Hit";
+        lastPourTargetName = "None";
 
-        if (TryGetPourRay(out Ray pourRay) &&
-            Physics.Raycast(pourRay, out RaycastHit hit, pourDistance, pourMask, QueryTriggerInteraction.Ignore) &&
-            hit.collider.TryGetComponent(out UmbrellaWaterTarget waterTarget))
+        if (TryGetPourRay(out Ray pourRay))
         {
-            waterTarget.ReceiveWater(pourAmount);
+            hasLastPourRay = true;
+            lastPourRayOrigin = pourRay.origin;
+            lastPourRayDirection = pourRay.direction;
+            lastPourDebugTimeRemaining = 1.5f;
+            Debug.DrawRay(pourRay.origin, pourRay.direction * pourDistance, Color.cyan, 1.5f, false);
+
+            RaycastHit[] hits = Physics.RaycastAll(
+                pourRay,
+                pourDistance,
+                pourMask,
+                QueryTriggerInteraction.Ignore
+            );
+
+            System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+
+            foreach (RaycastHit hit in hits)
+            {
+                if (hit.collider.GetComponentInParent<PlayerUmbrellaController>() == this)
+                {
+                    continue;
+                }
+
+                lastPourHitColliderName = hit.collider.name;
+
+                UmbrellaWaterTarget waterTarget = hit.collider.GetComponentInParent<UmbrellaWaterTarget>();
+                if (waterTarget != null)
+                {
+                    lastPourTargetName = waterTarget.name;
+                    waterTarget.ReceiveWater(pourAmount);
+                }
+
+                // 가장 먼저 맞은 유효 collider를 기준으로 처리한다.
+                break;
+            }
+        }
+        else
+        {
+            hasLastPourRay = false;
+            lastPourHitColliderName = "Invalid Ray";
+            lastPourTargetName = "None";
         }
 
         if (currentStoredWater <= 0.0f)
@@ -283,6 +339,20 @@ public class PlayerUmbrellaController : MonoBehaviour
         RefreshVisuals();
     }
 
+    private void LateUpdate()
+    {
+        if (!hasLastPourRay)
+        {
+            return;
+        }
+
+        lastPourDebugTimeRemaining -= Time.deltaTime;
+        if (lastPourDebugTimeRemaining <= 0.0f && currentState != UmbrellaState.Pouring)
+        {
+            hasLastPourRay = false;
+        }
+    }
+
     private void RefreshVisuals()
     {
         // 우산을 얻기 전에는 플레이어 손에 어떤 우산도 보이지 않게 한다.
@@ -291,7 +361,7 @@ public class PlayerUmbrellaController : MonoBehaviour
             SetVisualActive(closedVisual, false);
             SetVisualActive(openVisual, false);
             SetVisualActive(invertedVisual, false);
-            SetVisualActive(runtimePickupVisual, false);
+            SetRuntimePickupRenderersEnabled(false);
             return;
         }
 
@@ -302,12 +372,12 @@ public class PlayerUmbrellaController : MonoBehaviour
             SetVisualActive(closedVisual, currentState == UmbrellaState.Closed);
             SetVisualActive(openVisual, currentState == UmbrellaState.Open || currentState == UmbrellaState.Pouring);
             SetVisualActive(invertedVisual, currentState == UmbrellaState.Inverted);
-            SetVisualActive(runtimePickupVisual, false);
+            SetRuntimePickupRenderersEnabled(false);
             return;
         }
 
         // 전용 상태 비주얼을 아직 만들지 않았다면, 주운 우산 오브젝트 하나를 계속 보여준다.
-        SetVisualActive(runtimePickupVisual, true);
+        SetRuntimePickupRenderersEnabled(true);
     }
 
     private void SetVisualActive(GameObject target, bool active)
@@ -340,30 +410,37 @@ public class PlayerUmbrellaController : MonoBehaviour
         actionReference.action.Disable();
     }
 
-    private void OnDrawGizmosSelected()
+    private void OnDrawGizmos()
     {
-        if (!hasUmbrella)
-        {
-            return;
-        }
-
-        if (!TryGetPourRay(out Ray pourRay))
+        if (!Application.isPlaying || !hasUmbrella || !hasLastPourRay)
         {
             return;
         }
 
         Gizmos.color = IsPouring ? Color.cyan : Color.yellow;
-        Gizmos.DrawLine(pourRay.origin, pourRay.origin + pourRay.direction * pourDistance);
+        Gizmos.DrawLine(lastPourRayOrigin, lastPourRayOrigin + lastPourRayDirection * pourDistance);
+        Gizmos.DrawSphere(lastPourRayOrigin, 0.03f);
     }
 
     private void AttachPickupVisual(GameObject pickedVisual)
     {
+        // 우산을 TempUmbrella 단위가 아니라 UmbrellaRoot 전체로 붙여야
+        // PourOrigin과 이후 자식 오브젝트가 함께 플레이어를 따라간다.
         runtimePickupVisual = pickedVisual;
 
         Transform targetParent = pickupAttachPoint != null ? pickupAttachPoint : transform;
         runtimePickupVisual.transform.SetParent(targetParent, false);
         runtimePickupVisual.transform.localPosition = Vector3.zero;
         runtimePickupVisual.transform.localRotation = Quaternion.identity;
+
+        if (pourOrigin == null)
+        {
+            Transform runtimePourOrigin = FindPourOriginInPickupRoot(runtimePickupVisual.transform);
+            if (runtimePourOrigin != null)
+            {
+                pourOrigin = runtimePourOrigin;
+            }
+        }
 
         foreach (Collider collider in runtimePickupVisual.GetComponentsInChildren<Collider>(true))
         {
@@ -376,6 +453,42 @@ public class PlayerUmbrellaController : MonoBehaviour
             rigidbodyComponent.linearVelocity = Vector3.zero;
             rigidbodyComponent.angularVelocity = Vector3.zero;
         }
+    }
+
+    private void SetRuntimePickupRenderersEnabled(bool visible)
+    {
+        if (runtimePickupVisual == null)
+        {
+            return;
+        }
+
+        foreach (Renderer renderer in runtimePickupVisual.GetComponentsInChildren<Renderer>(true))
+        {
+            renderer.enabled = visible;
+        }
+    }
+
+    private Transform FindPourOriginInPickupRoot(Transform root)
+    {
+        if (root == null)
+        {
+            return null;
+        }
+
+        if (root.name == "PourOrigin")
+        {
+            return root;
+        }
+
+        foreach (Transform child in root.GetComponentsInChildren<Transform>(true))
+        {
+            if (child.name == "PourOrigin")
+            {
+                return child;
+            }
+        }
+
+        return null;
     }
 
     private bool WasUmbrellaActionPressed(InputActionReference actionReference, ButtonControl fallbackButton)
