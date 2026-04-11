@@ -3,11 +3,34 @@ using UnityEngine.InputSystem;
 
 public class PlayerMovement : MonoBehaviour
 {
-    // 이동 속도
+    private const float MoveInputThreshold = 0.0001f;
+
+    // 목표 최대 이동 속도
     public float moveSpeed = 5.0f;
+
+    // 지상에서 목표 속도까지 붙는 가속도
+    public float groundAcceleration = 30.0f;
+
+    // 지상에서 입력을 놓았을 때 줄어드는 감속도
+    public float groundDeceleration = 35.0f;
+
+    // 공중에서의 가속도
+    public float airAcceleration = 12.0f;
+
+    // 공중에서 입력을 놓았을 때의 감속도
+    public float airDeceleration = 4.0f;
 
     // 이동 방향을 바라보는 회전 속도
     public float turnSpeed = 720.0f;
+
+    // 우산 붓기처럼 명확한 조준 상태일 때는 더 빠르게 시선을 맞춘다.
+    public float facingOverrideTurnSpeedMultiplier = 2.5f;
+
+    // 이 각도부터 회전 중 감속을 시작한다
+    public float turnSlowdownStartAngle = 35.0f;
+
+    // 이 각도 이상 벌어지면 이동을 거의 멈추고 회전에 집중한다
+    public float turnLockAngle = 140.0f;
 
     // 점프 힘
     public float jumpForce = 5.0f;
@@ -27,10 +50,12 @@ public class PlayerMovement : MonoBehaviour
     // 현재 이동 입력값 저장
     private Vector2 moveInput;
 
+    // 다른 시스템이 잠깐 바라보는 방향을 강제로 지정할 때 사용한다.
+    private bool hasFacingOverride;
+    private Vector3 facingOverrideDirection;
+
     // 바닥 체크용
     public bool isGrounded;
-
-
 
     void Start()
     {
@@ -49,28 +74,14 @@ public class PlayerMovement : MonoBehaviour
 
     void OnEnable()
     {
-        if (moveAction != null)
-        {
-            moveAction.action.Enable();
-        }
-
-        if (jumpAction != null)
-        {
-            jumpAction.action.Enable();
-        }
+        EnableAction(moveAction);
+        EnableAction(jumpAction);
     }
 
     void OnDisable()
     {
-        if (moveAction != null)
-        {
-            moveAction.action.Disable();
-        }
-
-        if (jumpAction != null)
-        {
-            jumpAction.action.Disable();
-        }
+        DisableAction(moveAction);
+        DisableAction(jumpAction);
     }
 
     void Update()
@@ -110,35 +121,152 @@ public class PlayerMovement : MonoBehaviour
         // 입력값을 카메라 기준 이동 방향으로 변환
         Vector3 moveDirection = forward * moveInput.y + right * moveInput.x;
 
-        if (moveDirection.magnitude > 1.0f)
+        if (moveDirection.sqrMagnitude > 1.0f)
         {
             moveDirection.Normalize();
         }
 
-        Vector3 velocity = rb.linearVelocity;
-        velocity.x = moveDirection.x * moveSpeed;
-        velocity.z = moveDirection.z * moveSpeed;
-        rb.linearVelocity = velocity;
+        Vector3 effectiveMoveDirection = GetEffectiveMoveDirection(moveDirection);
 
-        RotateTowardsMoveDirection(moveDirection);
+        ApplyMovementForce(effectiveMoveDirection);
 
+        RotateTowardsMoveDirection(GetLookDirection(moveDirection));
+    }
+
+    Vector3 GetLookDirection(Vector3 moveDirection)
+    {
+        if (hasFacingOverride && facingOverrideDirection.sqrMagnitude > MoveInputThreshold)
+        {
+            return facingOverrideDirection;
+        }
+
+        return moveDirection;
+    }
+
+    Vector3 GetEffectiveMoveDirection(Vector3 desiredMoveDirection)
+    {
+        if (desiredMoveDirection.sqrMagnitude < MoveInputThreshold)
+        {
+            return Vector3.zero;
+        }
+
+        Vector3 facingDirection = rb.rotation * Vector3.forward;
+        facingDirection.y = 0.0f;
+        facingDirection.Normalize();
+
+        float angleToMoveDirection = Vector3.Angle(facingDirection, desiredMoveDirection);
+        float moveAlignmentFactor = GetMoveAlignmentFactor(angleToMoveDirection);
+        return desiredMoveDirection * moveAlignmentFactor;
+    }
+
+    float GetMoveAlignmentFactor(float angleToMoveDirection)
+    {
+        // 회전 중에도 완전히 멈추지 않게 하되,
+        // 크게 반대 방향으로 꺾을 때는 속도를 줄여 발 미끄럼을 완화한다.
+        if (angleToMoveDirection <= turnSlowdownStartAngle)
+        {
+            return 1.0f;
+        }
+
+        if (angleToMoveDirection >= turnLockAngle)
+        {
+            return 0.0f;
+        }
+
+        float t = Mathf.InverseLerp(turnLockAngle, turnSlowdownStartAngle, angleToMoveDirection);
+        return Mathf.SmoothStep(0.0f, 1.0f, t);
+    }
+
+    void ApplyMovementForce(Vector3 moveDirection)
+    {
+        Vector3 targetVelocity = moveDirection * moveSpeed;
+        Vector3 currentVelocity = rb.linearVelocity;
+        Vector3 currentHorizontalVelocity = new Vector3(currentVelocity.x, 0.0f, currentVelocity.z);
+
+        bool hasMoveInput = moveDirection.sqrMagnitude > MoveInputThreshold;
+        float acceleration = GetCurrentAcceleration(hasMoveInput);
+
+        Vector3 velocityDelta = targetVelocity - currentHorizontalVelocity;
+        Vector3 requiredAcceleration = velocityDelta / Time.fixedDeltaTime;
+        Vector3 clampedAcceleration = Vector3.ClampMagnitude(requiredAcceleration, acceleration);
+
+        rb.AddForce(clampedAcceleration, ForceMode.Acceleration);
+
+        Vector3 newHorizontalVelocity = new Vector3(rb.linearVelocity.x, 0.0f, rb.linearVelocity.z);
+        if (newHorizontalVelocity.magnitude > moveSpeed)
+        {
+            newHorizontalVelocity = newHorizontalVelocity.normalized * moveSpeed;
+            rb.linearVelocity = new Vector3(newHorizontalVelocity.x, rb.linearVelocity.y, newHorizontalVelocity.z);
+        }
+    }
+
+    float GetCurrentAcceleration(bool hasMoveInput)
+    {
+        if (isGrounded)
+        {
+            return hasMoveInput ? groundAcceleration : groundDeceleration;
+        }
+
+        return hasMoveInput ? airAcceleration : airDeceleration;
     }
 
     void RotateTowardsMoveDirection(Vector3 moveDirection)
     {
-        if (moveDirection.sqrMagnitude < 0.0001f)
+        if (moveDirection.sqrMagnitude < MoveInputThreshold)
         {
             return;
         }
 
         Quaternion targetRotation = Quaternion.LookRotation(moveDirection, Vector3.up);
+        float effectiveTurnSpeed = hasFacingOverride
+            ? turnSpeed * facingOverrideTurnSpeedMultiplier
+            : turnSpeed;
         Quaternion nextRotation = Quaternion.RotateTowards(
             rb.rotation,
             targetRotation,
-            turnSpeed * Time.fixedDeltaTime
+            effectiveTurnSpeed * Time.fixedDeltaTime
         );
 
         rb.MoveRotation(nextRotation);
+    }
+
+    public void SetFacingOverride(Vector3 worldDirection)
+    {
+        worldDirection.y = 0.0f;
+
+        if (worldDirection.sqrMagnitude < MoveInputThreshold)
+        {
+            return;
+        }
+
+        hasFacingOverride = true;
+        facingOverrideDirection = worldDirection.normalized;
+    }
+
+    public void ClearFacingOverride()
+    {
+        hasFacingOverride = false;
+        facingOverrideDirection = Vector3.zero;
+    }
+
+    void EnableAction(InputActionReference actionReference)
+    {
+        if (actionReference == null)
+        {
+            return;
+        }
+
+        actionReference.action.Enable();
+    }
+
+    void DisableAction(InputActionReference actionReference)
+    {
+        if (actionReference == null)
+        {
+            return;
+        }
+
+        actionReference.action.Disable();
     }
 
     void OnCollisionStay(Collision collision)
