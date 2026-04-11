@@ -2,7 +2,8 @@ using UnityEngine;
 
 public class UmbrellaWaterTarget : MonoBehaviour
 {
-    // 물을 받았을 때 실제 반응이 일어나는지를 빠르게 확인하기 위한 최소 타깃이다.
+    private static bool debugOverlayEnabled;
+
     public float requiredWater = 0.5f;
     public Renderer targetRenderer;
     public Color idleColor = Color.gray;
@@ -12,6 +13,12 @@ public class UmbrellaWaterTarget : MonoBehaviour
     [SerializeField] private bool isActivated;
 
     public bool IsActivated => isActivated;
+    public float ReceivedWater => receivedWater;
+
+    public static void SetDebugOverlayEnabled(bool enabled)
+    {
+        debugOverlayEnabled = enabled;
+    }
 
     private void Reset()
     {
@@ -33,7 +40,6 @@ public class UmbrellaWaterTarget : MonoBehaviour
 
     public void ReceiveWater(float amount)
     {
-        // 현재 단계에서는 누적량만 체크하고, 기준치를 넘으면 바로 활성화하는 단순한 구조로 둔다.
         if (isActivated || amount <= 0.0f)
         {
             return;
@@ -69,5 +75,53 @@ public class UmbrellaWaterTarget : MonoBehaviour
         {
             material.color = targetColor;
         }
+    }
+
+    private void OnGUI()
+    {
+        if (!Application.isPlaying || !debugOverlayEnabled)
+        {
+            return;
+        }
+
+        Camera targetCamera = Camera.main;
+        if (targetCamera == null)
+        {
+            return;
+        }
+
+        Vector3 worldLabelPosition = GetLabelWorldPosition();
+        Vector3 screenPoint = targetCamera.WorldToScreenPoint(worldLabelPosition);
+        if (screenPoint.z <= 0.0f)
+        {
+            return;
+        }
+
+        float width = 180.0f;
+        float height = 60.0f;
+        float x = screenPoint.x - width * 0.5f;
+        float y = Screen.height - screenPoint.y - height;
+
+        GUI.Box(new Rect(x, y, width, height), "Water Target");
+        GUI.Label(new Rect(x + 8.0f, y + 20.0f, width - 16.0f, 16.0f), $"Req: {requiredWater:F1}");
+        GUI.Label(new Rect(x + 8.0f, y + 36.0f, width - 16.0f, 16.0f), $"Cur: {receivedWater:F2}  Active: {isActivated}");
+    }
+
+    private Vector3 GetLabelWorldPosition()
+    {
+        if (targetRenderer != null)
+        {
+            Bounds rendererBounds = targetRenderer.bounds;
+            return rendererBounds.center + Vector3.up * (rendererBounds.extents.y + 0.25f);
+        }
+
+        Collider targetCollider = GetComponentInChildren<Collider>();
+        if (targetCollider != null)
+        {
+            Bounds colliderBounds = targetCollider.bounds;
+            return colliderBounds.center + Vector3.up * (colliderBounds.extents.y + 0.25f);
+        }
+
+        return transform.position + Vector3.up * 0.5f;
     }
 }

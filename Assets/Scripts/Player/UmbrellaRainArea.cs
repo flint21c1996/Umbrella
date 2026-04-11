@@ -2,7 +2,8 @@ using UnityEngine;
 
 public class UmbrellaRainArea : MonoBehaviour
 {
-    // 비 영역은 물리 효과 전체를 구현하기보다, 우산이 물을 저장할 수 있는지 먼저 검증하기 위한 테스트 구역이다.
+    // 비 영역 전체를 물리 효과로 구현하기보다,
+    // 플레이어 젖음과 우산 물 저장이 상태에 따라 어떻게 달라지는지 먼저 검증하기 위한 테스트 구역이다.
     public float rainFillRate = 1.0f;
 
     private void Reset()
@@ -24,6 +25,6 @@ public class UmbrellaRainArea : MonoBehaviour
             return;
         }
 
-        umbrellaController.AddWater(rainFillRate * Time.deltaTime);
+        umbrellaController.ApplyRainExposure(rainFillRate * Time.deltaTime);
     }
 }

@@ -1,76 +1,105 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
+using UnityEngine.Serialization;
 
 public class PlayerUmbrellaController : MonoBehaviour
 {
-    // 우산 시스템은 이동과 별도로 관리한다.
-    // 이동 입력과 우산 상태가 섞이기 시작하면 이후 활공, 차단, 상호작용 확장이 어려워지기 때문이다.
     public enum UmbrellaState
     {
         Closed,
         Open,
-        Inverted,
+        UpsideDown,
         Pouring
     }
 
     [Header("Ownership")]
-    // 테스트를 빠르게 하고 싶을 때를 대비해 시작 시 우산 소유 여부를 선택할 수 있게 둔다.
     public bool startWithUmbrella;
-    // 바닥에서 주운 우산을 플레이어 쪽에 붙일 기준점이다.
     public Transform pickupAttachPoint;
 
     [Header("Input")]
     public InputActionReference toggleUmbrellaAction;
     public InputActionReference invertUmbrellaAction;
     public InputActionReference pourAction;
-    // Input Action을 아직 연결하지 않아도 바로 테스트할 수 있도록 임시 키 입력을 둔다.
     public bool useKeyboardFallback = true;
 
     [Header("Visual")]
-    // 초기 단계에서는 애니메이션 대신 상태별 오브젝트를 켜고 끄는 방식으로 흐름을 검증한다.
     public GameObject closedVisual;
     public GameObject openVisual;
-    public GameObject invertedVisual;
+    [FormerlySerializedAs("invertedVisual")]
+    public GameObject upsideDownVisual;
     public Transform pourOrigin;
 
     [Header("Water")]
-    // 비를 받아 저장하고, 이후 특정 대상에게 붓는 가장 작은 루프를 먼저 만든다.
     public float maxStoredWater = 5.0f;
     public float pourRate = 1.5f;
     public float pourDistance = 3.0f;
     public LayerMask pourMask = ~0;
 
+    [Header("Rain Response")]
+    public float maxPlayerRainAmount = 5.0f;
+    public float naturalDryRate = 0.35f;
+    public float storedWaterWeightMultiplier = 1.0f;
+
+    [Header("Aim")]
+    public bool rotatePlayerTowardsMouseWhilePouring = true;
+    public float mouseAimRayDistance = 100.0f;
+    public LayerMask mouseAimMask = ~0;
+
     [Header("Debug Controls")]
-    // 비 구역이 아직 준비되지 않았을 때도 붓기 루프를 바로 확인할 수 있도록 임시 충전 키를 둔다.
     public bool enableDebugFillKey = true;
     public float debugFillAmount = 1.0f;
+    public bool enableDebugToggleKey = true;
+    public bool showDebugOverlay = true;
+    public bool showDebugGizmos = true;
+    public float debugFacingLineLength = 1.5f;
 
     [Header("Debug")]
     [SerializeField] private bool hasUmbrella;
     [SerializeField] private UmbrellaState currentState = UmbrellaState.Closed;
     [SerializeField] private float currentStoredWater;
+    [SerializeField] private float currentPlayerRainAmount;
+    [SerializeField] private float currentWeightKg;
     [SerializeField] private GameObject runtimePickupVisual;
-    [SerializeField] private string lastPourHitColliderName;
-    [SerializeField] private string lastPourTargetName;
+    [SerializeField] private string lastPourHitColliderName = "None";
+    [SerializeField] private string lastPourTargetName = "None";
     [SerializeField] private bool hasLastPourRay;
     [SerializeField] private Vector3 lastPourRayOrigin;
     [SerializeField] private Vector3 lastPourRayDirection;
-    [SerializeField] private float lastPourDebugTimeRemaining;
+    [SerializeField] private bool hasMouseAimPoint;
+    [SerializeField] private Vector3 lastMouseAimPoint;
+    [SerializeField] private Vector3 lastMouseAimDirection;
+    [SerializeField] private string lastMouseAimHitName = "None";
+
+    private PlayerMovement playerMovement;
+    private Rigidbody playerRigidbody;
+    private Camera cachedMainCamera;
+    private float baseWeightKg;
+    private float lastRainExposureTime = float.NegativeInfinity;
+    private const float RainExposureGraceTime = 0.12f;
 
     public bool HasUmbrella => hasUmbrella;
     public UmbrellaState CurrentState => currentState;
     public float CurrentStoredWater => currentStoredWater;
+    public float CurrentPlayerRainAmount => currentPlayerRainAmount;
+    public float CurrentWeightKg => currentWeightKg;
     public bool IsOpen => hasUmbrella && currentState == UmbrellaState.Open;
-    public bool IsInverted => hasUmbrella && currentState == UmbrellaState.Inverted;
+    public bool IsUpsideDown => hasUmbrella && currentState == UmbrellaState.UpsideDown;
     public bool IsPouring => hasUmbrella && currentState == UmbrellaState.Pouring;
-    public bool CanCollectWater => hasUmbrella && currentState == UmbrellaState.Inverted;
+    public bool CanCollectWater => hasUmbrella && currentState == UmbrellaState.UpsideDown;
 
     private void Start()
     {
+        playerMovement = GetComponent<PlayerMovement>();
+        playerRigidbody = GetComponent<Rigidbody>();
+        cachedMainCamera = Camera.main;
         hasUmbrella = startWithUmbrella;
         currentState = UmbrellaState.Closed;
         currentStoredWater = Mathf.Clamp(currentStoredWater, 0.0f, maxStoredWater);
+        currentPlayerRainAmount = Mathf.Clamp(currentPlayerRainAmount, 0.0f, maxPlayerRainAmount);
+        baseWeightKg = playerRigidbody != null ? playerRigidbody.mass : 0.0f;
+        RefreshWeight();
+        UmbrellaWaterTarget.SetDebugOverlayEnabled(showDebugOverlay);
         RefreshVisuals();
     }
 
@@ -86,18 +115,28 @@ public class PlayerUmbrellaController : MonoBehaviour
         DisableAction(toggleUmbrellaAction);
         DisableAction(invertUmbrellaAction);
         DisableAction(pourAction);
+        ClearPourAimOverride();
     }
 
     private void Update()
     {
-        // 우산을 얻기 전에는 시스템은 붙어 있어도 입력과 상호작용을 잠가둔다.
+        HandleDebugToggleInput();
+
         if (!hasUmbrella)
         {
+            ClearPourAimOverride();
             return;
         }
 
         HandleStateInput();
+        UpdatePourAimFacing();
         UpdatePouring();
+        UpdatePlayerRainDrying();
+
+        if (currentState != UmbrellaState.Pouring)
+        {
+            hasLastPourRay = false;
+        }
     }
 
     public void AcquireUmbrella()
@@ -115,6 +154,7 @@ public class PlayerUmbrellaController : MonoBehaviour
         hasUmbrella = true;
         currentState = UmbrellaState.Closed;
         currentStoredWater = 0.0f;
+        RefreshWeight();
 
         if (pickedVisual != null)
         {
@@ -134,19 +174,59 @@ public class PlayerUmbrellaController : MonoBehaviour
         hasUmbrella = false;
         currentState = UmbrellaState.Closed;
         currentStoredWater = 0.0f;
+        RefreshWeight();
         runtimePickupVisual = null;
+        ClearPourAimOverride();
         RefreshVisuals();
     }
 
     public void AddWater(float amount)
     {
-        // 뒤집힌 상태에서만 물을 받게 만들어, 상태 선택 자체가 곧 플레이 문법이 되도록 한다.
         if (!CanCollectWater || amount <= 0.0f)
         {
             return;
         }
 
         currentStoredWater = Mathf.Clamp(currentStoredWater + amount, 0.0f, maxStoredWater);
+        RefreshWeight();
+    }
+
+    public void ApplyRainExposure(float amount)
+    {
+        if (amount <= 0.0f)
+        {
+            return;
+        }
+
+        lastRainExposureTime = Time.time;
+
+        if (IsOpen)
+        {
+            return;
+        }
+
+        currentPlayerRainAmount = Mathf.Clamp(currentPlayerRainAmount + amount, 0.0f, maxPlayerRainAmount);
+
+        if (CanCollectWater)
+        {
+            AddWater(amount);
+        }
+    }
+
+    private void UpdatePlayerRainDrying()
+    {
+        if (currentPlayerRainAmount <= 0.0f)
+        {
+            return;
+        }
+
+        bool isStillReceivingRain = Time.time - lastRainExposureTime <= RainExposureGraceTime;
+        if (isStillReceivingRain)
+        {
+            return;
+        }
+
+        currentPlayerRainAmount = Mathf.Max(0.0f, currentPlayerRainAmount - naturalDryRate * Time.deltaTime);
     }
 
     private void HandleStateInput()
@@ -180,13 +260,28 @@ public class PlayerUmbrellaController : MonoBehaviour
         if (debugFillPressed)
         {
             currentStoredWater = Mathf.Clamp(currentStoredWater + debugFillAmount, 0.0f, maxStoredWater);
+            RefreshWeight();
+        }
+    }
+
+    private void HandleDebugToggleInput()
+    {
+        if (!enableDebugToggleKey || Keyboard.current == null)
+        {
+            return;
+        }
+
+        if (Keyboard.current.f3Key.wasPressedThisFrame)
+        {
+            bool nextValue = !showDebugOverlay;
+            showDebugOverlay = nextValue;
+            showDebugGizmos = nextValue;
+            UmbrellaWaterTarget.SetDebugOverlayEnabled(nextValue);
         }
     }
 
     private void ToggleOpenState()
     {
-        // 열린 상태와 닫힌 상태는 가장 자주 오가는 기본 상태다.
-        // 붓기나 뒤집기 도중에도 한 번에 열린 상태로 복귀할 수 있게 둔다.
         switch (currentState)
         {
             case UmbrellaState.Closed:
@@ -197,7 +292,7 @@ public class PlayerUmbrellaController : MonoBehaviour
                 SetState(UmbrellaState.Closed);
                 break;
 
-            case UmbrellaState.Inverted:
+            case UmbrellaState.UpsideDown:
             case UmbrellaState.Pouring:
                 SetState(UmbrellaState.Open);
                 break;
@@ -206,11 +301,9 @@ public class PlayerUmbrellaController : MonoBehaviour
 
     private void ToggleInvertState()
     {
-        // 뒤집기는 저장용 상태로 두고, 다시 누르면 닫힌 상태로 돌아가게 한다.
-        // 붓는 중이라면 먼저 붓기를 종료하고 뒤집힌 상태를 유지한다.
         switch (currentState)
         {
-            case UmbrellaState.Inverted:
+            case UmbrellaState.UpsideDown:
                 SetState(UmbrellaState.Closed);
                 break;
 
@@ -219,20 +312,19 @@ public class PlayerUmbrellaController : MonoBehaviour
                 break;
 
             default:
-                SetState(UmbrellaState.Inverted);
+                SetState(UmbrellaState.UpsideDown);
                 break;
         }
     }
 
     private void BeginPour()
     {
-        // 지금 단계에서는 저장한 물이 있고, 뒤집힌 상태일 때만 붓기를 허용한다.
         if (currentStoredWater <= 0.0f)
         {
             return;
         }
 
-        if (currentState != UmbrellaState.Inverted)
+        if (currentState != UmbrellaState.UpsideDown)
         {
             return;
         }
@@ -247,7 +339,28 @@ public class PlayerUmbrellaController : MonoBehaviour
             return;
         }
 
-        SetState(UmbrellaState.Inverted);
+        SetState(UmbrellaState.UpsideDown);
+    }
+
+    private void UpdatePourAimFacing()
+    {
+        if (!rotatePlayerTowardsMouseWhilePouring || currentState != UmbrellaState.Pouring)
+        {
+            ClearPourAimOverride();
+            return;
+        }
+
+        if (!TryGetMouseAimDirection(out Vector3 aimDirection, out Vector3 aimPoint, out string hitName))
+        {
+            ClearPourAimOverride();
+            return;
+        }
+
+        playerMovement?.SetFacingOverride(aimDirection);
+        hasMouseAimPoint = true;
+        lastMouseAimPoint = aimPoint;
+        lastMouseAimDirection = aimDirection;
+        lastMouseAimHitName = hitName;
     }
 
     private void UpdatePouring()
@@ -257,9 +370,9 @@ public class PlayerUmbrellaController : MonoBehaviour
             return;
         }
 
-        // 붓는 동안에는 저장량을 줄이고, 앞쪽에 있는 간단한 대상에게만 물을 전달한다.
         float pourAmount = pourRate * Time.deltaTime;
         currentStoredWater = Mathf.Max(0.0f, currentStoredWater - pourAmount);
+        RefreshWeight();
         lastPourHitColliderName = "No Hit";
         lastPourTargetName = "None";
 
@@ -268,8 +381,7 @@ public class PlayerUmbrellaController : MonoBehaviour
             hasLastPourRay = true;
             lastPourRayOrigin = pourRay.origin;
             lastPourRayDirection = pourRay.direction;
-            lastPourDebugTimeRemaining = 1.5f;
-            Debug.DrawRay(pourRay.origin, pourRay.direction * pourDistance, Color.cyan, 1.5f, false);
+            Debug.DrawRay(pourRay.origin, pourRay.direction * pourDistance, Color.cyan, 0.0f, false);
 
             RaycastHit[] hits = Physics.RaycastAll(
                 pourRay,
@@ -296,7 +408,6 @@ public class PlayerUmbrellaController : MonoBehaviour
                     waterTarget.ReceiveWater(pourAmount);
                 }
 
-                // 가장 먼저 맞은 유효 collider를 기준으로 처리한다.
                 break;
             }
         }
@@ -313,10 +424,88 @@ public class PlayerUmbrellaController : MonoBehaviour
         }
     }
 
+    private bool TryGetMouseAimDirection(out Vector3 aimDirection, out Vector3 aimPoint, out string hitName)
+    {
+        aimDirection = Vector3.zero;
+        aimPoint = Vector3.zero;
+        hitName = "None";
+
+        if (Mouse.current == null)
+        {
+            return false;
+        }
+
+        Camera targetCamera = cachedMainCamera != null ? cachedMainCamera : Camera.main;
+        if (targetCamera == null)
+        {
+            return false;
+        }
+
+        cachedMainCamera = targetCamera;
+
+        Ray mouseRay = targetCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
+        RaycastHit[] hits = Physics.RaycastAll(
+            mouseRay,
+            mouseAimRayDistance,
+            mouseAimMask,
+            QueryTriggerInteraction.Ignore
+        );
+
+        System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+
+        foreach (RaycastHit hit in hits)
+        {
+            if (hit.collider.GetComponentInParent<PlayerUmbrellaController>() == this)
+            {
+                continue;
+            }
+
+            Vector3 hitDirection = hit.point - transform.position;
+            hitDirection.y = 0.0f;
+            if (hitDirection.sqrMagnitude <= 0.000001f)
+            {
+                continue;
+            }
+
+            aimPoint = hit.point;
+            aimDirection = hitDirection.normalized;
+            hitName = hit.collider.name;
+            return true;
+        }
+
+        Plane groundPlane = new Plane(Vector3.up, transform.position);
+        if (!groundPlane.Raycast(mouseRay, out float enter))
+        {
+            return false;
+        }
+
+        Vector3 planePoint = mouseRay.GetPoint(enter);
+        Vector3 planeDirection = planePoint - transform.position;
+        planeDirection.y = 0.0f;
+        if (planeDirection.sqrMagnitude <= 0.000001f)
+        {
+            return false;
+        }
+
+        aimPoint = planePoint;
+        aimDirection = planeDirection.normalized;
+        hitName = "Ground Plane";
+        return true;
+    }
+
     private bool TryGetPourRay(out Ray pourRay)
     {
         Transform origin = pourOrigin != null ? pourOrigin : transform;
         Vector3 direction = origin.forward;
+
+        if (hasMouseAimPoint)
+        {
+            Vector3 aimDirection = lastMouseAimPoint - origin.position;
+            if (aimDirection.sqrMagnitude > 0.000001f)
+            {
+                direction = aimDirection.normalized;
+            }
+        }
 
         if (direction.sqrMagnitude <= 0.000001f)
         {
@@ -335,49 +524,69 @@ public class PlayerUmbrellaController : MonoBehaviour
             return;
         }
 
+        if (ShouldSpillStoredWater(nextState))
+        {
+            SpillStoredWater();
+        }
+
         currentState = nextState;
         RefreshVisuals();
     }
 
-    private void LateUpdate()
+    private bool ShouldSpillStoredWater(UmbrellaState nextState)
     {
-        if (!hasLastPourRay)
-        {
-            return;
-        }
+        bool isHoldingWaterState = currentState == UmbrellaState.UpsideDown || currentState == UmbrellaState.Pouring;
+        bool isNonHoldingState = nextState == UmbrellaState.Open || nextState == UmbrellaState.Closed;
+        return isHoldingWaterState && isNonHoldingState && currentStoredWater > 0.0f;
+    }
 
-        lastPourDebugTimeRemaining -= Time.deltaTime;
-        if (lastPourDebugTimeRemaining <= 0.0f && currentState != UmbrellaState.Pouring)
-        {
-            hasLastPourRay = false;
-        }
+    private void SpillStoredWater()
+    {
+        currentStoredWater = 0.0f;
+        RefreshWeight();
+    }
+
+    private void ClearPourAimOverride()
+    {
+        playerMovement?.ClearFacingOverride();
+        hasMouseAimPoint = false;
+        lastMouseAimDirection = Vector3.zero;
+        lastMouseAimHitName = "None";
     }
 
     private void RefreshVisuals()
     {
-        // 우산을 얻기 전에는 플레이어 손에 어떤 우산도 보이지 않게 한다.
         if (!hasUmbrella)
         {
             SetVisualActive(closedVisual, false);
             SetVisualActive(openVisual, false);
-            SetVisualActive(invertedVisual, false);
+            SetVisualActive(upsideDownVisual, false);
             SetRuntimePickupRenderersEnabled(false);
             return;
         }
 
-        bool hasDedicatedVisuals = closedVisual != null || openVisual != null || invertedVisual != null;
+        bool hasDedicatedVisuals = closedVisual != null || openVisual != null || upsideDownVisual != null;
 
         if (hasDedicatedVisuals)
         {
             SetVisualActive(closedVisual, currentState == UmbrellaState.Closed);
             SetVisualActive(openVisual, currentState == UmbrellaState.Open || currentState == UmbrellaState.Pouring);
-            SetVisualActive(invertedVisual, currentState == UmbrellaState.Inverted);
+            SetVisualActive(upsideDownVisual, currentState == UmbrellaState.UpsideDown);
             SetRuntimePickupRenderersEnabled(false);
             return;
         }
 
-        // 전용 상태 비주얼을 아직 만들지 않았다면, 주운 우산 오브젝트 하나를 계속 보여준다.
         SetRuntimePickupRenderersEnabled(true);
+    }
+
+    private void RefreshWeight()
+    {
+        currentWeightKg = baseWeightKg + currentStoredWater * storedWaterWeightMultiplier;
+
+        if (playerRigidbody != null)
+        {
+            playerRigidbody.mass = currentWeightKg;
+        }
     }
 
     private void SetVisualActive(GameObject target, bool active)
@@ -390,42 +599,8 @@ public class PlayerUmbrellaController : MonoBehaviour
         target.SetActive(active);
     }
 
-    private void EnableAction(InputActionReference actionReference)
-    {
-        if (actionReference == null)
-        {
-            return;
-        }
-
-        actionReference.action.Enable();
-    }
-
-    private void DisableAction(InputActionReference actionReference)
-    {
-        if (actionReference == null)
-        {
-            return;
-        }
-
-        actionReference.action.Disable();
-    }
-
-    private void OnDrawGizmos()
-    {
-        if (!Application.isPlaying || !hasUmbrella || !hasLastPourRay)
-        {
-            return;
-        }
-
-        Gizmos.color = IsPouring ? Color.cyan : Color.yellow;
-        Gizmos.DrawLine(lastPourRayOrigin, lastPourRayOrigin + lastPourRayDirection * pourDistance);
-        Gizmos.DrawSphere(lastPourRayOrigin, 0.03f);
-    }
-
     private void AttachPickupVisual(GameObject pickedVisual)
     {
-        // 우산을 TempUmbrella 단위가 아니라 UmbrellaRoot 전체로 붙여야
-        // PourOrigin과 이후 자식 오브젝트가 함께 플레이어를 따라간다.
         runtimePickupVisual = pickedVisual;
 
         Transform targetParent = pickupAttachPoint != null ? pickupAttachPoint : transform;
@@ -491,6 +666,26 @@ public class PlayerUmbrellaController : MonoBehaviour
         return null;
     }
 
+    private void EnableAction(InputActionReference actionReference)
+    {
+        if (actionReference == null)
+        {
+            return;
+        }
+
+        actionReference.action.Enable();
+    }
+
+    private void DisableAction(InputActionReference actionReference)
+    {
+        if (actionReference == null)
+        {
+            return;
+        }
+
+        actionReference.action.Disable();
+    }
+
     private bool WasUmbrellaActionPressed(InputActionReference actionReference, ButtonControl fallbackButton)
     {
         if (actionReference != null && actionReference.action.WasPressedThisFrame())
@@ -509,5 +704,193 @@ public class PlayerUmbrellaController : MonoBehaviour
         }
 
         return useKeyboardFallback && fallbackButton != null && fallbackButton.wasReleasedThisFrame;
+    }
+
+    private void OnDrawGizmos()
+    {
+        if (!Application.isPlaying || !showDebugGizmos)
+        {
+            return;
+        }
+
+        DrawPlayerColliderDebug();
+        DrawFacingDirectionDebug();
+
+        if (hasUmbrella && hasLastPourRay)
+        {
+            Gizmos.color = IsPouring ? Color.cyan : Color.yellow;
+            Gizmos.DrawLine(lastPourRayOrigin, GetCurrentPourDebugEndPoint());
+            Gizmos.DrawSphere(lastPourRayOrigin, 0.03f);
+        }
+
+        if (hasUmbrella && hasMouseAimPoint)
+        {
+            Gizmos.color = new Color(1.0f, 0.4f, 0.2f, 0.9f);
+            Gizmos.DrawLine(transform.position + Vector3.up * 0.2f, lastMouseAimPoint);
+            Gizmos.DrawSphere(lastMouseAimPoint, 0.06f);
+        }
+    }
+
+    private void DrawPlayerColliderDebug()
+    {
+        foreach (Collider playerCollider in GetComponentsInChildren<Collider>(true))
+        {
+            if (!playerCollider.enabled)
+            {
+                continue;
+            }
+
+            Bounds bounds = playerCollider.bounds;
+            Gizmos.color = new Color(0.4f, 1.0f, 0.4f, 0.85f);
+            Gizmos.DrawWireCube(bounds.center, bounds.size);
+        }
+    }
+
+    private void DrawFacingDirectionDebug()
+    {
+        Vector3 start = transform.position + Vector3.up * 0.2f;
+        Vector3 end = start + transform.forward * debugFacingLineLength;
+        Gizmos.color = new Color(0.3f, 1.0f, 0.3f, 0.95f);
+        Gizmos.DrawLine(start, end);
+        Gizmos.DrawSphere(end, 0.04f);
+    }
+
+    private void OnGUI()
+    {
+        if (!Application.isPlaying || !showDebugOverlay)
+        {
+            return;
+        }
+
+        DrawGameViewDebugLines();
+
+        Rect panelRect = new Rect(16.0f, 16.0f, 320.0f, 230.0f);
+        GUI.Box(panelRect, "Umbrella Debug");
+
+        float lineY = panelRect.y + 28.0f;
+        DrawDebugLabel(panelRect.x + 12.0f, ref lineY, $"State: {currentState}");
+        DrawDebugLabel(panelRect.x + 12.0f, ref lineY, $"Has Umbrella: {hasUmbrella}");
+        DrawDebugLabel(panelRect.x + 12.0f, ref lineY, $"Stored Water: {currentStoredWater:F2}");
+        DrawDebugLabel(panelRect.x + 12.0f, ref lineY, $"Player Rain: {currentPlayerRainAmount:F2}");
+        DrawDebugLabel(panelRect.x + 12.0f, ref lineY, $"Weight: {currentWeightKg:F2} kg");
+        DrawDebugLabel(panelRect.x + 12.0f, ref lineY, $"Aim Hit: {lastMouseAimHitName}");
+        DrawDebugLabel(panelRect.x + 12.0f, ref lineY, $"Pour Hit: {lastPourHitColliderName}");
+        DrawDebugLabel(panelRect.x + 12.0f, ref lineY, $"Pour Target: {lastPourTargetName}");
+        DrawDebugLabel(panelRect.x + 12.0f, ref lineY, $"Debug Toggle: F3");
+
+        DrawPlayerStatusOverlay();
+    }
+
+    private void DrawDebugLabel(float x, ref float y, string text)
+    {
+        GUI.Label(new Rect(x, y, 300.0f, 18.0f), text);
+        y += 20.0f;
+    }
+
+    private void DrawGameViewDebugLines()
+    {
+        Camera targetCamera = cachedMainCamera != null ? cachedMainCamera : Camera.main;
+        if (targetCamera == null)
+        {
+            return;
+        }
+
+        if (hasLastPourRay)
+        {
+            Vector3 pourEnd = GetCurrentPourDebugEndPoint();
+            DrawWorldLine(targetCamera, lastPourRayOrigin, pourEnd, Color.cyan, 3.0f);
+        }
+
+        Vector3 facingStart = transform.position + Vector3.up * 0.2f;
+        Vector3 facingEnd = facingStart + transform.forward * debugFacingLineLength;
+        DrawWorldLine(targetCamera, facingStart, facingEnd, new Color(0.3f, 1.0f, 0.3f, 0.95f), 3.0f);
+
+        if (hasMouseAimPoint)
+        {
+            Vector3 aimStart = transform.position + Vector3.up * 0.2f;
+            DrawWorldLine(targetCamera, aimStart, lastMouseAimPoint, new Color(1.0f, 0.4f, 0.2f, 0.9f), 2.0f);
+        }
+    }
+
+    private void DrawWorldLine(Camera targetCamera, Vector3 worldStart, Vector3 worldEnd, Color color, float thickness)
+    {
+        Vector3 screenStart = targetCamera.WorldToScreenPoint(worldStart);
+        Vector3 screenEnd = targetCamera.WorldToScreenPoint(worldEnd);
+
+        if (screenStart.z <= 0.0f || screenEnd.z <= 0.0f)
+        {
+            return;
+        }
+
+        screenStart.y = Screen.height - screenStart.y;
+        screenEnd.y = Screen.height - screenEnd.y;
+
+        DrawScreenLine(screenStart, screenEnd, color, thickness);
+    }
+
+    private void DrawScreenLine(Vector2 start, Vector2 end, Color color, float thickness)
+    {
+        Matrix4x4 previousMatrix = GUI.matrix;
+        Color previousColor = GUI.color;
+
+        Vector2 delta = end - start;
+        float angle = Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg;
+        float length = delta.magnitude;
+
+        GUI.color = color;
+        GUIUtility.RotateAroundPivot(angle, start);
+        GUI.DrawTexture(new Rect(start.x, start.y - thickness * 0.5f, length, thickness), Texture2D.whiteTexture);
+
+        GUI.matrix = previousMatrix;
+        GUI.color = previousColor;
+    }
+
+    private Vector3 GetCurrentPourDebugEndPoint()
+    {
+        if (!hasLastPourRay)
+        {
+            return lastPourRayOrigin;
+        }
+
+        Vector3 fallbackEndPoint = lastPourRayOrigin + lastPourRayDirection * pourDistance;
+        if (!hasMouseAimPoint)
+        {
+            return fallbackEndPoint;
+        }
+
+        Vector3 toAimPoint = lastMouseAimPoint - lastPourRayOrigin;
+        if (toAimPoint.sqrMagnitude <= 0.000001f)
+        {
+            return fallbackEndPoint;
+        }
+
+        float clampedDistance = Mathf.Min(toAimPoint.magnitude, pourDistance);
+        return lastPourRayOrigin + toAimPoint.normalized * clampedDistance;
+    }
+
+    private void DrawPlayerStatusOverlay()
+    {
+        Camera targetCamera = cachedMainCamera != null ? cachedMainCamera : Camera.main;
+        if (targetCamera == null)
+        {
+            return;
+        }
+
+        Vector3 worldLabelPosition = transform.position + Vector3.up * 1.6f;
+        Vector3 screenPoint = targetCamera.WorldToScreenPoint(worldLabelPosition);
+        if (screenPoint.z <= 0.0f)
+        {
+            return;
+        }
+
+        float width = 180.0f;
+        float height = 78.0f;
+        float x = screenPoint.x - width * 0.5f;
+        float y = Screen.height - screenPoint.y - height;
+
+        GUI.Box(new Rect(x, y, width, height), "Player Rain");
+        GUI.Label(new Rect(x + 8.0f, y + 20.0f, width - 16.0f, 16.0f), $"Rain: {currentPlayerRainAmount:F2}");
+        GUI.Label(new Rect(x + 8.0f, y + 36.0f, width - 16.0f, 16.0f), $"Stored: {currentStoredWater:F2}");
+        GUI.Label(new Rect(x + 8.0f, y + 52.0f, width - 16.0f, 16.0f), $"Weight: {currentWeightKg:F2} kg");
     }
 }
