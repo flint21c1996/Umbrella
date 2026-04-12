@@ -49,9 +49,8 @@ public class PlayerUmbrellaController : MonoBehaviour
     [Header("Debug Controls")]
     public bool enableDebugFillKey = true;
     public float debugFillAmount = 1.0f;
-    public bool enableDebugToggleKey = true;
-    public bool showDebugOverlay = true;
-    public bool showDebugGizmos = true;
+    [HideInInspector] public bool showDebugOverlay = true;
+    [HideInInspector] public bool showDebugGizmos = true;
     public float debugFacingLineLength = 1.5f;
 
     [Header("Debug")]
@@ -99,7 +98,6 @@ public class PlayerUmbrellaController : MonoBehaviour
         currentPlayerRainAmount = Mathf.Clamp(currentPlayerRainAmount, 0.0f, maxPlayerRainAmount);
         baseWeightKg = playerRigidbody != null ? playerRigidbody.mass : 0.0f;
         RefreshWeight();
-        UmbrellaWaterTarget.SetDebugOverlayEnabled(showDebugOverlay);
         RefreshVisuals();
     }
 
@@ -120,8 +118,6 @@ public class PlayerUmbrellaController : MonoBehaviour
 
     private void Update()
     {
-        HandleDebugToggleInput();
-
         if (!hasUmbrella)
         {
             ClearPourAimOverride();
@@ -137,6 +133,12 @@ public class PlayerUmbrellaController : MonoBehaviour
         {
             hasLastPourRay = false;
         }
+    }
+
+    public void SetDebugVisible(bool showOverlay, bool showGizmos)
+    {
+        showDebugOverlay = showOverlay;
+        showDebugGizmos = showGizmos;
     }
 
     public void AcquireUmbrella()
@@ -261,22 +263,6 @@ public class PlayerUmbrellaController : MonoBehaviour
         {
             currentStoredWater = Mathf.Clamp(currentStoredWater + debugFillAmount, 0.0f, maxStoredWater);
             RefreshWeight();
-        }
-    }
-
-    private void HandleDebugToggleInput()
-    {
-        if (!enableDebugToggleKey || Keyboard.current == null)
-        {
-            return;
-        }
-
-        if (Keyboard.current.f3Key.wasPressedThisFrame)
-        {
-            bool nextValue = !showDebugOverlay;
-            showDebugOverlay = nextValue;
-            showDebugGizmos = nextValue;
-            UmbrellaWaterTarget.SetDebugOverlayEnabled(nextValue);
         }
     }
 
