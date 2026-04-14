@@ -65,9 +65,13 @@ public class UmbrellaPickup : MonoBehaviour
         Rigidbody rigidbodyComponent = GetComponent<Rigidbody>();
         if (rigidbodyComponent != null)
         {
+            if (!rigidbodyComponent.isKinematic)
+            {
+                rigidbodyComponent.linearVelocity = Vector3.zero;
+                rigidbodyComponent.angularVelocity = Vector3.zero;
+            }
+
             rigidbodyComponent.isKinematic = true;
-            rigidbodyComponent.linearVelocity = Vector3.zero;
-            rigidbodyComponent.angularVelocity = Vector3.zero;
         }
     }
 }

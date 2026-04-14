@@ -630,9 +630,13 @@ public class PlayerUmbrellaController : MonoBehaviour
 
         foreach (Rigidbody rigidbodyComponent in runtimePickupVisual.GetComponentsInChildren<Rigidbody>(true))
         {
+            if (!rigidbodyComponent.isKinematic)
+            {
+                rigidbodyComponent.linearVelocity = Vector3.zero;
+                rigidbodyComponent.angularVelocity = Vector3.zero;
+            }
+
             rigidbodyComponent.isKinematic = true;
-            rigidbodyComponent.linearVelocity = Vector3.zero;
-            rigidbodyComponent.angularVelocity = Vector3.zero;
         }
     }
 
