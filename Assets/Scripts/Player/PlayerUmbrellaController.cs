@@ -182,6 +182,26 @@ public class PlayerUmbrellaController : MonoBehaviour
         RefreshVisuals();
     }
 
+    public void OpenUmbrella()
+    {
+        if (!hasUmbrella)
+        {
+            return;
+        }
+
+        SetState(UmbrellaState.Open);
+    }
+
+    public void CloseUmbrella()
+    {
+        if (!hasUmbrella)
+        {
+            return;
+        }
+
+        SetState(UmbrellaState.Closed);
+    }
+
     public void AddWater(float amount)
     {
         if (!CanCollectWater || amount <= 0.0f)

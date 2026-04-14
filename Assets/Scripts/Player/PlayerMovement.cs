@@ -1,10 +1,11 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.InputSystem;
 
-public class PlayerMovement : MonoBehaviour
+public partial class PlayerMovement : MonoBehaviour
 {
     private const float MoveInputThreshold = 0.0001f;
 
+    [Header("Move")]
     // 목표 최대 이동 속도
     public float moveSpeed = 5.0f;
 
@@ -32,17 +33,12 @@ public class PlayerMovement : MonoBehaviour
     // 이 각도 이상 벌어지면 이동을 거의 멈추고 회전에 집중한다
     public float turnLockAngle = 140.0f;
 
-    // 점프 힘
-    public float jumpForce = 5.0f;
-
+    [Header("References")]
     // 이동 기준이 되는 카메라 리그
     public Transform cameraRig;
 
     // 이동 입력 액션
     public InputActionReference moveAction;
-
-    // 점프 입력 액션
-    public InputActionReference jumpAction;
 
     // Rigidbody 참조
     private Rigidbody rb;
@@ -70,35 +66,39 @@ public class PlayerMovement : MonoBehaviour
         {
             Debug.LogError("CameraRig is not assigned in the Inspector.");
         }
+
+        InitializeJumpReferences();
+    }
+
+    void OnValidate()
+    {
+        ValidateJumpSettings();
     }
 
     void OnEnable()
     {
         EnableAction(moveAction);
-        EnableAction(jumpAction);
+        EnableJumpAction();
     }
 
     void OnDisable()
     {
         DisableAction(moveAction);
-        DisableAction(jumpAction);
+        DisableJumpAction();
     }
 
     void Update()
     {
-        if (moveAction == null || jumpAction == null || rb == null || cameraRig == null)
+        if (rb == null || cameraRig == null)
         {
             return;
         }
 
         // 입력은 Update에서 읽어서 저장
-        moveInput = moveAction.action.ReadValue<Vector2>();
+        InputAction moveInputAction = moveAction != null ? moveAction.action : null;
+        moveInput = moveInputAction != null ? moveInputAction.ReadValue<Vector2>() : Vector2.zero;
 
-        // 점프는 바닥에 있을 때만
-        if (isGrounded && jumpAction.action.WasPressedThisFrame())
-        {
-            rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
-        }
+        UpdateJumpInput();
     }
 
     void FixedUpdate()
@@ -131,6 +131,8 @@ public class PlayerMovement : MonoBehaviour
         ApplyMovementForce(effectiveMoveDirection);
 
         RotateTowardsMoveDirection(GetLookDirection(moveDirection));
+
+        ApplyGlideFallLimit();
     }
 
     Vector3 GetLookDirection(Vector3 moveDirection)
@@ -267,15 +269,5 @@ public class PlayerMovement : MonoBehaviour
         }
 
         actionReference.action.Disable();
-    }
-
-    void OnCollisionStay(Collision collision)
-    {
-        isGrounded = true;
-    }
-
-    void OnCollisionExit(Collision collision)
-    {
-        isGrounded = false;
     }
 }
