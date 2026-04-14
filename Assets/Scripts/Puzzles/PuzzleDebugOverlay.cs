@@ -77,6 +77,24 @@ public static class PuzzleDebugOverlay
         DrawDashedScreenLine(start, end, color, thickness, dashLength, gapLength, dashOffset);
     }
 
+    public static void DrawGuiToWorldLine(
+        Camera targetCamera,
+        Vector2 guiStart,
+        Vector3 worldEnd,
+        Color color,
+        float thickness,
+        float screenOffset = 0.0f)
+    {
+        if (!TryGetGuiPoint(targetCamera, worldEnd, out Vector2 end))
+        {
+            return;
+        }
+
+        Vector2 start = guiStart;
+        ApplyScreenLineOffset(ref start, ref end, screenOffset);
+        DrawScreenLine(start, end, color, thickness);
+    }
+
     public static void DrawDashedGizmoLine(
         Vector3 worldStart,
         Vector3 worldEnd,
