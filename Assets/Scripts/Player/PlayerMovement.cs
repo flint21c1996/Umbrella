@@ -50,8 +50,21 @@ public partial class PlayerMovement : MonoBehaviour
     private bool hasFacingOverride;
     private Vector3 facingOverrideDirection;
 
+    private bool isRotationLocked;
+
     // 바닥 체크용
     public bool isGrounded;
+
+    // 밀기/당기기 같은 외부 시스템이 플레이어 이동 속도를 잠시 낮출 때 사용한다.
+    private float externalMoveSpeedMultiplier = 1.0f;
+
+    // 밀기/당기기처럼 다른 컴포넌트가 직접 수평 속도를 정할 때 사용한다.
+    private bool hasExternalHorizontalVelocity;
+    private Vector3 externalHorizontalVelocity;
+
+    public Vector2 MoveInput => moveInput;
+    public float ExternalMoveSpeedMultiplier => externalMoveSpeedMultiplier;
+    public Vector3 RigidbodyPosition => rb != null ? rb.position : transform.position;
 
     void Start()
     {
@@ -73,6 +86,7 @@ public partial class PlayerMovement : MonoBehaviour
     void OnValidate()
     {
         ValidateJumpSettings();
+        externalMoveSpeedMultiplier = Mathf.Max(0.0f, externalMoveSpeedMultiplier);
     }
 
     void OnEnable()
@@ -108,7 +122,94 @@ public partial class PlayerMovement : MonoBehaviour
             return;
         }
 
-        // 카메라 기준 forward/right 계산
+        Vector3 moveDirection = GetCameraRelativeMoveDirection(moveInput);
+
+        if (hasExternalHorizontalVelocity)
+        {
+            ApplyExternalHorizontalVelocity();
+            ApplyGlideFallLimit();
+            return;
+        }
+
+        Vector3 effectiveMoveDirection = GetEffectiveMoveDirection(moveDirection);
+
+        ApplyMovementForce(effectiveMoveDirection);
+
+        if (!isRotationLocked)
+        {
+            RotateTowardsMoveDirection(GetLookDirection(moveDirection));
+        }
+
+        ApplyGlideFallLimit();
+    }
+
+    public void SetExternalMoveSpeedMultiplier(float multiplier)
+    {
+        externalMoveSpeedMultiplier = Mathf.Max(0.0f, multiplier);
+    }
+
+    public void ResetExternalMoveSpeedMultiplier()
+    {
+        externalMoveSpeedMultiplier = 1.0f;
+    }
+
+    public void SetRotationLocked(bool locked)
+    {
+        isRotationLocked = locked;
+    }
+
+    public void SetHorizontalVelocity(Vector3 horizontalVelocity)
+    {
+        if (rb == null)
+        {
+            return;
+        }
+
+        horizontalVelocity.y = 0.0f;
+        externalHorizontalVelocity = horizontalVelocity;
+        hasExternalHorizontalVelocity = true;
+        rb.linearVelocity = new Vector3(horizontalVelocity.x, rb.linearVelocity.y, horizontalVelocity.z);
+    }
+
+    public void ClearHorizontalVelocityOverride()
+    {
+        hasExternalHorizontalVelocity = false;
+        externalHorizontalVelocity = Vector3.zero;
+    }
+
+    public void StopHorizontalMovement()
+    {
+        if (rb == null)
+        {
+            return;
+        }
+
+        rb.linearVelocity = new Vector3(0.0f, rb.linearVelocity.y, 0.0f);
+    }
+
+    public void FaceDirectionImmediately(Vector3 worldDirection)
+    {
+        if (rb == null)
+        {
+            return;
+        }
+
+        worldDirection.y = 0.0f;
+        if (worldDirection.sqrMagnitude < MoveInputThreshold)
+        {
+            return;
+        }
+
+        rb.rotation = Quaternion.LookRotation(worldDirection.normalized, Vector3.up);
+    }
+
+    public Vector3 GetCameraRelativeMoveDirection(Vector2 input)
+    {
+        if (cameraRig == null)
+        {
+            return Vector3.zero;
+        }
+
         Vector3 forward = cameraRig.forward;
         Vector3 right = cameraRig.right;
 
@@ -119,20 +220,14 @@ public partial class PlayerMovement : MonoBehaviour
         right.Normalize();
 
         // 입력값을 카메라 기준 이동 방향으로 변환
-        Vector3 moveDirection = forward * moveInput.y + right * moveInput.x;
+        Vector3 moveDirection = forward * input.y + right * input.x;
 
         if (moveDirection.sqrMagnitude > 1.0f)
         {
             moveDirection.Normalize();
         }
 
-        Vector3 effectiveMoveDirection = GetEffectiveMoveDirection(moveDirection);
-
-        ApplyMovementForce(effectiveMoveDirection);
-
-        RotateTowardsMoveDirection(GetLookDirection(moveDirection));
-
-        ApplyGlideFallLimit();
+        return moveDirection;
     }
 
     Vector3 GetLookDirection(Vector3 moveDirection)
@@ -181,7 +276,7 @@ public partial class PlayerMovement : MonoBehaviour
 
     void ApplyMovementForce(Vector3 moveDirection)
     {
-        Vector3 targetVelocity = moveDirection * moveSpeed;
+        Vector3 targetVelocity = moveDirection * (moveSpeed * externalMoveSpeedMultiplier);
         Vector3 currentVelocity = rb.linearVelocity;
         Vector3 currentHorizontalVelocity = new Vector3(currentVelocity.x, 0.0f, currentVelocity.z);
 
@@ -195,11 +290,17 @@ public partial class PlayerMovement : MonoBehaviour
         rb.AddForce(clampedAcceleration, ForceMode.Acceleration);
 
         Vector3 newHorizontalVelocity = new Vector3(rb.linearVelocity.x, 0.0f, rb.linearVelocity.z);
-        if (newHorizontalVelocity.magnitude > moveSpeed)
+        float currentMoveSpeedLimit = moveSpeed * externalMoveSpeedMultiplier;
+        if (newHorizontalVelocity.magnitude > currentMoveSpeedLimit)
         {
-            newHorizontalVelocity = newHorizontalVelocity.normalized * moveSpeed;
+            newHorizontalVelocity = newHorizontalVelocity.normalized * currentMoveSpeedLimit;
             rb.linearVelocity = new Vector3(newHorizontalVelocity.x, rb.linearVelocity.y, newHorizontalVelocity.z);
         }
+    }
+
+    void ApplyExternalHorizontalVelocity()
+    {
+        rb.linearVelocity = new Vector3(externalHorizontalVelocity.x, rb.linearVelocity.y, externalHorizontalVelocity.z);
     }
 
     float GetCurrentAcceleration(bool hasMoveInput)
