@@ -1,6 +1,8 @@
 using System;
 using UnityEngine;
 
+// 우산에서 부은 물을 저장하는 대상.
+// 저장량이 기준치에 도달하면 활성화 상태가 되고, 선택적으로 Rigidbody 질량에도 물 무게를 더한다.
 public class UmbrellaWaterTarget : MonoBehaviour
 {
     private static bool debugOverlayEnabled;
@@ -27,13 +29,16 @@ public class UmbrellaWaterTarget : MonoBehaviour
     public float ReceivedWater => receivedWater;
     public float AddedWeight => receivedWater * waterWeightMultiplier;
 
+    // 물 저장량이 바뀔 때 WaterAmountCondition 같은 외부 조건 컴포넌트가 반응하도록 알린다.
     public event Action WaterChanged;
 
+    // GameDebugController가 F3 디버그 UI 토글을 전달할 때 사용한다.
     public static void SetDebugOverlayEnabled(bool enabled)
     {
         debugOverlayEnabled = enabled;
     }
 
+    // 컴포넌트를 처음 붙였을 때 자주 필요한 참조를 자동으로 채운다.
     private void Reset()
     {
         CacheWeightedRigidbody();
@@ -44,6 +49,8 @@ public class UmbrellaWaterTarget : MonoBehaviour
         }
     }
 
+    // 런타임 시작 시 기준 질량과 초기 물 상태를 정리한다.
+    // baseMass를 먼저 저장해야 물 무게를 여러 번 더하는 문제가 생기지 않는다.
     private void Start()
     {
         CacheWeightedRigidbody();
@@ -61,6 +68,7 @@ public class UmbrellaWaterTarget : MonoBehaviour
         NotifyWaterChanged();
     }
 
+    // Inspector에서 음수 값이나 현재 저장량이 요구량을 넘는 상태를 방지한다.
     private void OnValidate()
     {
         requiredWater = Mathf.Max(0.0f, requiredWater);
@@ -68,8 +76,11 @@ public class UmbrellaWaterTarget : MonoBehaviour
         waterWeightMultiplier = Mathf.Max(0.0f, waterWeightMultiplier);
     }
 
+    // 우산에서 물을 부을 때 호출된다.
+    // 물은 requiredWater를 넘지 않게 저장하고, 상태/무게/시각/조건 이벤트를 함께 갱신한다.
     public void ReceiveWater(float amount)
     {
+        // 이미 활성화됐거나 의미 없는 양이면 아무것도 하지 않는다.
         if (isActivated || amount <= 0.0f)
         {
             return;
@@ -77,6 +88,7 @@ public class UmbrellaWaterTarget : MonoBehaviour
 
         receivedWater = Mathf.Clamp(receivedWater + amount, 0.0f, requiredWater);
 
+        // 요구량에 도달하면 한 번 활성화된다.
         if (receivedWater >= requiredWater)
         {
             isActivated = true;
@@ -87,6 +99,8 @@ public class UmbrellaWaterTarget : MonoBehaviour
         NotifyWaterChanged();
     }
 
+    // 물 무게를 더할 Rigidbody를 찾는다.
+    // 물 저장 오브젝트가 상자의 자식으로 들어가는 구조를 고려해 부모에서도 찾는다.
     private void CacheWeightedRigidbody()
     {
         if (weightedRigidbody == null)
@@ -95,6 +109,8 @@ public class UmbrellaWaterTarget : MonoBehaviour
         }
     }
 
+    // 저장된 물의 양을 Rigidbody 질량에 반영한다.
+    // 기준 질량 + 물 무게 방식이라 물이 추가될 때마다 누적 중복이 생기지 않는다.
     private void RefreshWeight()
     {
         if (!addWaterToRigidbodyMass || weightedRigidbody == null)
@@ -105,11 +121,14 @@ public class UmbrellaWaterTarget : MonoBehaviour
         weightedRigidbody.mass = baseMass + AddedWeight;
     }
 
+    // 물 저장량이 바뀌었다는 사실만 외부에 알린다.
+    // 어떤 퍼즐이 반응할지는 WaterAmountCondition/ConditionGroup이 결정한다.
     private void NotifyWaterChanged()
     {
         WaterChanged?.Invoke();
     }
 
+    // 활성화 여부에 따라 머티리얼 색을 바꾼다.
     private void RefreshVisual()
     {
         if (targetRenderer == null)
@@ -134,6 +153,7 @@ public class UmbrellaWaterTarget : MonoBehaviour
 
     private void OnGUI()
     {
+        // F3 디버그 오버레이가 켜진 Play 모드에서만 물 저장 정보를 표시한다.
         if (!Application.isPlaying || !debugOverlayEnabled)
         {
             return;
@@ -163,6 +183,8 @@ public class UmbrellaWaterTarget : MonoBehaviour
         GUI.Label(new Rect(x + 8.0f, y + 52.0f, width - 16.0f, 16.0f), $"Water Weight: +{AddedWeight:F2} kg");
     }
 
+    // 디버그 라벨을 띄울 월드 위치를 계산한다.
+    // Renderer/Collider의 위쪽을 우선 사용해서 라벨이 물체 중앙을 가리지 않게 한다.
     private Vector3 GetLabelWorldPosition()
     {
         if (targetRenderer != null)
