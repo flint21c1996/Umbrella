@@ -73,8 +73,20 @@ public class WaterAmountCondition : PuzzleConditionSource
             return;
         }
 
+        // 중복 구독을 막기 위해 먼저 제거한 뒤 다시 등록한다.
         waterTarget.WaterChanged -= OnWaterChanged;
         waterTarget.WaterChanged += OnWaterChanged;
+        /*
+        여기서 -= 후 +=를 하는 이유는 중복 구독을 막기 위해서다.
+
+        +=는 이벤트에 함수를 등록한다는 뜻이다.
+        그런데 같은 함수를 여러 번 등록하면 이벤트가 발생했을 때 그 함수도 여러 번 호출된다.
+
+        그래서 먼저 -=로 혹시 이미 등록되어 있는 핸들러를 제거하고,
+        그 다음 +=로 다시 등록한다.
+
+        이렇게 하면 OnWaterChanged는 항상 한 번만 등록된다.
+        */
     }
 
     // WaterTarget 교체/비활성화 시 이전 구독을 정리한다.
