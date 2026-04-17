@@ -77,6 +77,8 @@ public partial class PlayerMovement : MonoBehaviour
             Debug.LogError("Rigidbody is missing on the Player object.");
         }
 
+        EnsureRigidbodyRotationConstraints();
+
         if (cameraRig == null)
         {
             Debug.LogError("CameraRig is not assigned in the Inspector.");
@@ -90,6 +92,18 @@ public partial class PlayerMovement : MonoBehaviour
     {
         ValidateJumpSettings();
         externalMoveSpeedMultiplier = Mathf.Max(0.0f, externalMoveSpeedMultiplier);
+    }
+
+    // 플레이어가 넘어지지 않게 X/Z 회전은 잠그되, 이동 방향과 회전 발판을 따라갈 수 있게 Y 회전은 열어둔다.
+    void EnsureRigidbodyRotationConstraints()
+    {
+        if (rb == null)
+        {
+            return;
+        }
+
+        rb.constraints &= ~RigidbodyConstraints.FreezeRotationY;
+        rb.constraints |= RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
     }
 
     // 이동 입력과 점프 입력을 활성화한다.
@@ -130,6 +144,9 @@ public partial class PlayerMovement : MonoBehaviour
             return;
         }
 
+        ClearPhysicsAngularVelocity();
+        ApplyMovingPlatformMotion();
+
         Vector3 moveDirection = GetCameraRelativeMoveDirection(moveInput);
 
         // 상자 잡기처럼 외부 컴포넌트가 수평 속도를 직접 지정하는 동안에는
@@ -138,6 +155,7 @@ public partial class PlayerMovement : MonoBehaviour
         {
             ApplyExternalHorizontalVelocity();
             ApplyGlideFallLimit();
+            ClearPhysicsAngularVelocity();
             return;
         }
 
@@ -152,6 +170,7 @@ public partial class PlayerMovement : MonoBehaviour
         }
 
         ApplyGlideFallLimit();
+        ClearPhysicsAngularVelocity();
     }
 
     // 외부 시스템이 기본 이동 속도에 배율을 걸 때 사용한다.

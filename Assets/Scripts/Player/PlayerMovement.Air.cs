@@ -211,6 +211,9 @@ public partial class PlayerMovement
             rb.linearVelocity = new Vector3(rb.linearVelocity.x, 0.0f, rb.linearVelocity.z);
         }
 
+        // 회전 발판 위에서 점프했다면, 착지 전까지 그 발판 기준 이동을 유지한다.
+        BeginMovingPlatformAirCarry();
+
         rb.AddForce(Vector3.up * force, ForceMode.Impulse);
         jumpCount = Mathf.Min(jumpCount + 1, maxJumpCount);
         isGrounded = false;
@@ -380,9 +383,15 @@ public partial class PlayerMovement
         }
 
         // 충돌 중 하나라도 바닥 접촉이면 착지 상태로 바꾼다.
-        if (HasGroundContact(collision))
+        if (TryGetGroundContact(collision))
         {
             isGrounded = true;
+
+            // 착지한 바닥이 움직이는 표면이면 이후 FixedUpdate에서 그 이동량을 따라간다.
+            currentMovingPlatform = collision.collider.GetComponentInParent<MovingPlatformSurface>();
+
+            // 새 바닥에 닿았으니 점프를 시작했던 이전 발판 기준 보정은 끝낸다.
+            ClearMovingPlatformAirCarry();
         }
     }
 
@@ -390,16 +399,20 @@ public partial class PlayerMovement
     void OnCollisionExit(Collision collision)
     {
         isGrounded = false;
+
+        // 바닥에서 떨어지면 현재 밟고 있는 움직이는 표면도 없어진다.
+        currentMovingPlatform = null;
     }
 
     // 충돌 지점 중 위쪽을 향한 면이 있을 때만 바닥 접촉으로 인정한다.
-    bool HasGroundContact(Collision collision)
+    bool TryGetGroundContact(Collision collision)
     {
         // 벽이나 옆면 충돌을 바닥으로 착각하지 않게 위쪽을 향한 접촉만 바닥으로 인정한다.
         for (int i = 0; i < collision.contactCount; i++)
         {
             // normal.y가 충분히 크면 플레이어 아래쪽에서 받쳐주는 면으로 판단한다.
-            if (collision.GetContact(i).normal.y >= GroundContactNormalY)
+            ContactPoint contact = collision.GetContact(i);
+            if (contact.normal.y >= GroundContactNormalY)
             {
                 return true;
             }
