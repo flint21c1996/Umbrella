@@ -7,18 +7,27 @@ using UnityEngine;
 [RequireComponent(typeof(Rigidbody))]
 public class PushPullObject : MonoBehaviour
 {
+    private const float GroundContactNormalY = 0.55f;
+    private const float PlatformMoveThreshold = 0.000001f;
+
     [Header("Movement")]
     // 너무 빨리 미끄러지지 않게 수평 속도를 제한한다.
     public float maxHorizontalSpeed = 2.5f;
 
+    [Header("Platform Carry")]
+    // 회전 플랫폼 위에 올려진 상자가 플랫폼의 위치 변화량을 따라가게 한다.
+    // 상자 자체 회전은 잡기 축이 헷갈리지 않도록 여기서 직접 돌리지 않는다.
+
     [Header("Runtime")]
     [SerializeField] private Rigidbody targetRigidbody;
     [SerializeField] private bool isGrabbed;
+    [SerializeField] private MovingPlatformSurface currentMovingPlatform;
 
     private PlayerPushPullInteractor currentGrabber;
     private RigidbodyConstraints baseConstraints;
 
     public Vector3 RigidbodyPosition => targetRigidbody != null ? targetRigidbody.position : transform.position;
+    public MovingPlatformSurface CurrentMovingPlatform => currentMovingPlatform;
 
     // 컴포넌트를 처음 붙였을 때 기본 Rigidbody 세팅을 잡아준다.
     // 손으로 미는 물체는 넘어지면 조작감이 망가지기 쉬워서 X/Z 회전을 기본으로 잠근다.
@@ -48,6 +57,12 @@ public class PushPullObject : MonoBehaviour
     {
         CacheRigidbody();
         maxHorizontalSpeed = Mathf.Max(0.0f, maxHorizontalSpeed);
+    }
+
+    private void FixedUpdate()
+    {
+        ApplyGrabStateConstraints(isGrabbed);
+        ApplyMovingPlatformMotion();
     }
 
     // 현재 이 물체를 잡을 수 있는지 확인한다.
@@ -106,6 +121,32 @@ public class PushPullObject : MonoBehaviour
         horizontalVelocity = ClampHorizontalVelocity(horizontalVelocity);
         targetRigidbody.linearVelocity = new Vector3(horizontalVelocity.x, targetRigidbody.linearVelocity.y, horizontalVelocity.z);
         return horizontalVelocity;
+    }
+
+    // 현재 밟고 있는 움직이는 발판의 위치 변화량만큼 상자를 함께 옮긴다.
+    // 상자가 부모-자식 관계가 아니어도 회전 플랫폼 위에 얹힌 물체처럼 따라가게 하는 처리다.
+    private void ApplyMovingPlatformMotion()
+    {
+        if (targetRigidbody == null || currentMovingPlatform == null)
+        {
+            return;
+        }
+
+        Vector3 platformDelta = currentMovingPlatform.GetDeltaPositionAt(targetRigidbody.position);
+        if (platformDelta.sqrMagnitude > PlatformMoveThreshold)
+        {
+            Vector3 nextPosition = targetRigidbody.position + platformDelta;
+
+            if (isGrabbed)
+            {
+                targetRigidbody.MovePosition(nextPosition);
+                return;
+            }
+
+            // 잡지 않은 상자는 X/Z 위치 잠금을 유지한다.
+            // 대신 발판에 실려 가는 위치 보정만 직접 반영해서 몸으로 밀리는 힘은 받지 않게 한다.
+            targetRigidbody.position = nextPosition;
+        }
     }
 
     // Rigidbody를 직접 넣지 않아도 같은 오브젝트에서 자동으로 찾는다.
@@ -179,5 +220,48 @@ public class PushPullObject : MonoBehaviour
         }
 
         return horizontalVelocity.normalized * maxHorizontalSpeed;
+    }
+
+    // 충돌이 유지되는 동안 아래쪽에서 받쳐주는 움직이는 발판이 있는지 확인한다.
+    private void OnCollisionStay(Collision collision)
+    {
+        if (!TryGetGroundContact(collision))
+        {
+            return;
+        }
+
+        MovingPlatformSurface platform = collision.collider.GetComponentInParent<MovingPlatformSurface>();
+        if (platform != null)
+        {
+            currentMovingPlatform = platform;
+        }
+    }
+
+    // 현재 기억하고 있는 움직이는 발판에서 떨어지면 더 이상 발판 이동량을 따라가지 않는다.
+    private void OnCollisionExit(Collision collision)
+    {
+        MovingPlatformSurface platform = collision.collider.GetComponentInParent<MovingPlatformSurface>();
+        if (platform == null || platform != currentMovingPlatform)
+        {
+            return;
+        }
+
+        currentMovingPlatform = null;
+        ApplyGrabStateConstraints(isGrabbed);
+    }
+
+    // 벽이나 옆면 충돌을 바닥으로 착각하지 않도록 위쪽을 향한 접촉만 바닥으로 본다.
+    private static bool TryGetGroundContact(Collision collision)
+    {
+        for (int i = 0; i < collision.contactCount; i++)
+        {
+            ContactPoint contact = collision.GetContact(i);
+            if (contact.normal.y >= GroundContactNormalY)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

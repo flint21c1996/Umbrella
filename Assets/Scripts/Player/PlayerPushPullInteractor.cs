@@ -139,6 +139,8 @@ public class PlayerPushPullInteractor : MonoBehaviour
             return;
         }
 
+        ApplyGrabbedPlatformFrameMotion();
+
         Vector3 moveDirection = playerMovement.GetCameraRelativeMoveDirection(playerMovement.MoveInput);
         Vector3 grabbedVelocity = Vector3.zero;
         if (moveDirection.sqrMagnitude > MoveInputThreshold && grabbedMoveAxis.sqrMagnitude > MoveInputThreshold)
@@ -161,6 +163,39 @@ public class PlayerPushPullInteractor : MonoBehaviour
         Vector3 playerVelocity = grabbedVelocity - appliedCorrectionVelocity * PlayerCorrectionInfluence;
 
         playerMovement.SetHorizontalVelocity(playerVelocity);
+    }
+
+    // 회전 발판 위에서 잡고 있을 때는 잡은 순간의 간격과 이동축도 발판 회전만큼 같이 돌린다.
+    // 위치만 발판을 따라가고 이 기준값들이 월드 방향에 고정되면, 보정 속도가 대각선 힘처럼 섞일 수 있다.
+    private void ApplyGrabbedPlatformFrameMotion()
+    {
+        if (grabbedObject == null)
+        {
+            return;
+        }
+
+        MovingPlatformSurface platform = grabbedObject.CurrentMovingPlatform;
+        if (platform == null)
+        {
+            return;
+        }
+
+        float platformYawDelta = platform.GetDeltaYaw();
+        if (Mathf.Approximately(platformYawDelta, 0.0f))
+        {
+            return;
+        }
+
+        Quaternion yawDelta = Quaternion.AngleAxis(platformYawDelta, Vector3.up);
+        grabbedOffsetFromPlayer = yawDelta * grabbedOffsetFromPlayer;
+        grabbedOffsetFromPlayer.y = 0.0f;
+
+        grabbedMoveAxis = yawDelta * grabbedMoveAxis;
+        grabbedMoveAxis.y = 0.0f;
+        if (grabbedMoveAxis.sqrMagnitude > MoveInputThreshold)
+        {
+            grabbedMoveAxis.Normalize();
+        }
     }
 
     // 현재 잡을 수 있는 후보를 갱신한다.
@@ -304,9 +339,28 @@ public class PlayerPushPullInteractor : MonoBehaviour
         Vector3 desiredObjectPosition = playerMovement.RigidbodyPosition + grabbedOffsetFromPlayer;
         Vector3 offsetError = desiredObjectPosition - grabbedObject.RigidbodyPosition;
         offsetError.y = 0.0f;
+
+        // 잡기 이동은 처음 잡은 면의 축으로만 허용한다.
+        // 간격 보정까지 X/Z 전체 방향으로 넣으면 상자가 대각선으로 밀릴 수 있어서 같은 축으로만 투영한다.
+        Vector3 axisLimitedError = ProjectOntoGrabbedMoveAxis(offsetError);
+
         return Vector3.ClampMagnitude(
-            offsetError * HoldOffsetCorrectionStrength,
+            axisLimitedError * HoldOffsetCorrectionStrength,
             MaxHoldOffsetCorrectionSpeed);
+    }
+
+    // 입력이나 보정 벡터를 현재 잡기 축 위로만 남긴다.
+    // 이렇게 해야 상자를 앞뒤 또는 좌우 한 축으로만 안정적으로 밀고 당길 수 있다.
+    private Vector3 ProjectOntoGrabbedMoveAxis(Vector3 vector)
+    {
+        vector.y = 0.0f;
+
+        if (grabbedMoveAxis.sqrMagnitude <= MoveInputThreshold)
+        {
+            return Vector3.zero;
+        }
+
+        return grabbedMoveAxis * Vector3.Dot(vector, grabbedMoveAxis);
     }
 
     // 잡기 시작한 순간 플레이어가 상자를 바라보게 한다.
