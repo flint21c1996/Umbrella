@@ -7,13 +7,13 @@ using UnityEngine;
 public class WaterAmountCondition : PuzzleConditionSource
 {
     [Header("Water")]
-    [Tooltip("Water target whose stored water decides this condition.")]
+    [Tooltip("저장된 물의 양으로 이 조건을 판단할 물 저장 대상.")]
     [SerializeField] private UmbrellaWaterTarget waterTarget;
 
-    [Tooltip("If empty, this condition uses the target's Required Water value.")]
+    [Tooltip("켜두면 Water Target의 Required Water 값을 필요 물 양으로 사용한다.")]
     [SerializeField] private bool useTargetRequiredWater = true;
 
-    [Tooltip("Water amount required when Use Target Required Water is off.")]
+    [Tooltip("Use Target Required Water를 끈 경우 직접 사용할 필요 물 양.")]
     [SerializeField] private float requiredWater = 1.0f;
 
     [Header("Runtime")]

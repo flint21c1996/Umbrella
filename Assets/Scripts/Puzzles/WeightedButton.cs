@@ -3,36 +3,36 @@ using UnityEngine;
 // WeightSensor가 읽은 무게를 바탕으로 눌림 상태를 만드는 퍼즐 조건 소스.
 // 문이나 플랫폼을 직접 호출하지 않고, PuzzleConditionGroup이 IsSatisfied를 읽도록 설계했다.
 [DisallowMultipleComponent]
-public class WeightedButton : PuzzleConditionSource
+public class WeightedButton : PuzzleConditionSource, IPuzzleWeightSource
 {
     private const float ButtonLabelWidth = 170.0f;
     private const float ButtonLabelHeight = 58.0f;
 
     [Header("Weight")]
-    [Tooltip("Sensor that measures the weight currently on this button.")]
+    [Tooltip("현재 이 버튼 위에 올라온 무게를 측정할 센서.")]
     [SerializeField] private WeightSensor sensor;
 
-    [Tooltip("The button becomes pressed when the current weight is equal to or higher than this value.")]
+    [Tooltip("현재 무게가 이 값 이상이면 버튼이 눌린 상태가 된다.")]
     [SerializeField] private float pressWeight = 5.0f;
 
-    [Tooltip("The button releases when the current weight falls to or below this value. Keep this lower than Press Weight to prevent flickering.")]
+    [Tooltip("현재 무게가 이 값 이하로 내려가면 버튼이 해제된다. 흔들림을 줄이려면 Press Weight보다 낮게 둔다.")]
     [SerializeField] private float releaseWeight = 4.5f;
 
     [Header("Motion")]
-    [Tooltip("The visible part of the button that moves up and down.")]
+    [Tooltip("위아래로 움직이는 버튼의 시각 오브젝트.")]
     [SerializeField] private Transform buttonVisual;
 
-    [Tooltip("Position used when the button is not pressed.")]
+    [Tooltip("버튼이 눌리지 않았을 때 사용할 위치.")]
     [SerializeField] private Transform releasedPoint;
 
-    [Tooltip("Position used when the button is pressed.")]
+    [Tooltip("버튼이 눌렸을 때 사용할 위치.")]
     [SerializeField] private Transform pressedPoint;
 
-    [Tooltip("How fast the button visual moves toward the target point.")]
+    [Tooltip("버튼 시각 오브젝트가 목표 위치로 이동하는 속도.")]
     [SerializeField] private float moveSpeed = 1.5f;
 
     [Header("Debug")]
-    [Tooltip("Optional F3 debug label anchor. If empty, Button Visual is used.")]
+    [Tooltip("F3 디버그 라벨 기준점. 비워두면 Button Visual을 사용한다.")]
     [SerializeField] private Transform debugAnchor;
 
     [SerializeField] private bool isPressed;
@@ -40,6 +40,8 @@ public class WeightedButton : PuzzleConditionSource
 
     public bool IsPressed => isPressed;
     public override bool IsSatisfied => IsPressed;
+
+    // 양팔저울이 WeightedButton 자체를 무게 소스로 읽을 수 있게 현재 센서 무게를 공개한다.
     public float CurrentWeight => currentWeight;
     public Vector3 DebugAnchorPosition => GetDebugAnchorPosition();
 

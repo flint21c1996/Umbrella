@@ -14,24 +14,24 @@ public class PuzzleConditionGroup : MonoBehaviour
     private const float EventLabelHeight = 24.0f;
 
     [Header("Conditions")]
-    [Tooltip("Every condition in this list must be satisfied before this group activates.")]
+    [Tooltip("이 목록의 모든 조건이 만족되어야 그룹이 활성화된다.")]
     [SerializeField] private PuzzleConditionSource[] conditionSources = new PuzzleConditionSource[0];
 
     [Header("Events")]
-    [Tooltip("Called once when every condition becomes satisfied.")]
+    [Tooltip("모든 조건이 만족되는 순간 한 번 호출된다.")]
     [SerializeField] private UnityEvent onSatisfied = new UnityEvent();
 
-    [Tooltip("Called once when at least one condition becomes unsatisfied again.")]
+    [Tooltip("조건 중 하나라도 다시 불만족 상태가 되는 순간 한 번 호출된다.")]
     [SerializeField] private UnityEvent onUnsatisfied = new UnityEvent();
 
     [Header("Debug")]
-    [Tooltip("Optional F3 debug label/link anchor. If empty, this object's position is used.")]
+    [Tooltip("F3 디버그 라벨과 연결선의 기준점. 비워두면 이 오브젝트 위치를 사용한다.")]
     [SerializeField] private Transform debugAnchor;
 
-    [Tooltip("F3 debug link thickness.")]
+    [Tooltip("F3 디버그 연결선의 두께.")]
     [SerializeField] private float debugLineThickness = 1.0f;
 
-    [Tooltip("F3 debug link alpha.")]
+    [Tooltip("F3 디버그 연결선의 투명도.")]
     [Range(0.05f, 1.0f)]
     [SerializeField] private float debugLineAlpha = 0.38f;
 
