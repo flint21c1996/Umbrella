@@ -411,7 +411,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 10, y: 1, z: 10}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -428,6 +428,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: CameraRig
       objectReference: {fileID: 0}
+    - target: {fileID: 1586480411748851201, guid: 79886d35b3b346d4b80be660d3186654, type: 3}
+      propertyPath: target
+      value: 
+      objectReference: {fileID: 1951441194}
     - target: {fileID: 7308133594636520943, guid: 79886d35b3b346d4b80be660d3186654, type: 3}
       propertyPath: m_LocalPosition.x
       value: 1.5
@@ -530,6 +534,11 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 2bb21d1aabcd6f24eaa8505cf8264e08, type: 3}
+--- !u!4 &1951441194 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: 5855403450444667505, guid: bda49588e633f6d45a1d8ea232546ea3, type: 3}
+  m_PrefabInstance: {fileID: 2376386515479701507}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &2125126516 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 7308133594636520943, guid: 79886d35b3b346d4b80be660d3186654, type: 3}
