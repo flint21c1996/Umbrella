@@ -34,13 +34,19 @@ public class WaterBasinTarget : MonoBehaviour
     [Header("Runtime")]
     [SerializeField] private float currentVolume;
     [SerializeField] private float waterSurfaceWorldY;
+    [SerializeField] private float groupWaterSurfaceWorldY;
+    [SerializeField] private float groupSurfaceSpread;
+    [SerializeField] private float groupVolume;
+    [SerializeField] private float groupCapacity;
+    [SerializeField] private int groupTargetCount;
 
     [Header("Debug")]
     [SerializeField] private bool drawGizmos = true;
+    [SerializeField] private bool drawSurfaceGizmo = true;
     [SerializeField] private bool showGameViewDebug = true;
     [SerializeField] private bool showGroupDebug = true;
     [SerializeField] private Vector3 labelOffset = new Vector3(0.0f, 1.25f, 0.0f);
-    [SerializeField] private Vector2 labelSize = new Vector2(220.0f, 112.0f);
+    [SerializeField] private Vector2 labelSize = new Vector2(240.0f, 148.0f);
     [SerializeField] private Color debugColor = new Color(0.1f, 0.45f, 1.0f, 0.35f);
 
     private float observedUmbrellaWater;
@@ -54,6 +60,11 @@ public class WaterBasinTarget : MonoBehaviour
     public float MaxWaterHeight => maxWaterHeight;
     public float CurrentVolume => currentVolume;
     public float WaterSurfaceWorldY => waterSurfaceWorldY;
+    public float GroupWaterSurfaceWorldY => groupWaterSurfaceWorldY;
+    public float GroupSurfaceSpread => groupSurfaceSpread;
+    public float GroupVolume => groupVolume;
+    public float GroupCapacity => groupCapacity;
+    public int GroupTargetCount => groupTargetCount;
     public float BottomWorldY => useTransformYAsBottom ? transform.position.y : manualBottomWorldY;
     public float TopWorldY => BottomWorldY + maxWaterHeight;
     public float Capacity => surfaceArea * maxWaterHeight;
@@ -71,6 +82,10 @@ public class WaterBasinTarget : MonoBehaviour
         CacheUmbrellaTarget();
         currentVolume = Mathf.Clamp(initialVolume, 0.0f, Capacity);
         waterSurfaceWorldY = GetSurfaceForLocalVolume(currentVolume);
+        groupWaterSurfaceWorldY = waterSurfaceWorldY;
+        groupVolume = currentVolume;
+        groupCapacity = Capacity;
+        groupTargetCount = 1;
         observedUmbrellaWater = umbrellaWaterTarget != null ? umbrellaWaterTarget.ReceivedWater : 0.0f;
     }
 
@@ -97,7 +112,7 @@ public class WaterBasinTarget : MonoBehaviour
         currentVolume = Mathf.Clamp(currentVolume, 0.0f, Capacity);
         labelSize = new Vector2(
             Mathf.Max(160.0f, labelSize.x),
-            Mathf.Max(72.0f, labelSize.y));
+            Mathf.Max(126.0f, labelSize.y));
 
         if (useTransformYAsBottom)
         {
@@ -168,6 +183,8 @@ public class WaterBasinTarget : MonoBehaviour
             WaterBasinTarget target = group[i];
             target.ApplySolvedState(target.GetVolumeAtSurface(surfaceY), surfaceY);
         }
+
+        RefreshDebugStateForGroup(group, surfaceY);
     }
 
     private List<WaterBasinTarget> CollectConnectedGroup()
@@ -275,7 +292,7 @@ public class WaterBasinTarget : MonoBehaviour
     private void ApplySolvedState(float solvedVolume, float solvedSurfaceY)
     {
         float nextVolume = Mathf.Clamp(solvedVolume, 0.0f, Capacity);
-        float nextSurfaceY = nextVolume <= Epsilon ? BottomWorldY : solvedSurfaceY;
+        float nextSurfaceY = solvedSurfaceY;
         bool changed = Mathf.Abs(currentVolume - nextVolume) > Epsilon
             || Mathf.Abs(waterSurfaceWorldY - nextSurfaceY) > Epsilon;
 
@@ -371,6 +388,17 @@ public class WaterBasinTarget : MonoBehaviour
         Gizmos.color = lineColor;
         Gizmos.DrawWireCube(center, size);
 
+        if (drawSurfaceGizmo)
+        {
+            float surfaceY = Application.isPlaying
+                ? groupWaterSurfaceWorldY
+                : BottomWorldY + Mathf.Min(maxWaterHeight, initialVolume / surfaceArea);
+            Vector3 surfaceCenter = new Vector3(transform.position.x, surfaceY, transform.position.z);
+            Vector3 surfaceSize = new Vector3(side, 0.02f, side);
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawWireCube(surfaceCenter, surfaceSize);
+        }
+
         for (int i = 0; i < connectedTargets.Count; i++)
         {
             WaterBasinTarget connected = connectedTargets[i];
@@ -408,32 +436,73 @@ public class WaterBasinTarget : MonoBehaviour
 
         GUI.Box(new Rect(x, y, labelSize.x, labelSize.y), "Water Basin Target");
         GUI.Label(new Rect(x + 8.0f, y + 20.0f, labelSize.x - 16.0f, 18.0f), $"Vol: {currentVolume:F2} / {Capacity:F2}  Fill: {Fill01:P0}");
-        GUI.Label(new Rect(x + 8.0f, y + 38.0f, labelSize.x - 16.0f, 18.0f), $"Depth: {WaterDepth:F2}  SurfaceY: {waterSurfaceWorldY:F2}");
-        GUI.Label(new Rect(x + 8.0f, y + 56.0f, labelSize.x - 16.0f, 18.0f), $"Area: {surfaceArea:F2}  MaxH: {maxWaterHeight:F2}");
-        GUI.Label(new Rect(x + 8.0f, y + 74.0f, labelSize.x - 16.0f, 18.0f), $"Links: {connectedTargets.Count}");
+        GUI.Label(new Rect(x + 8.0f, y + 38.0f, labelSize.x - 16.0f, 18.0f), $"Depth: {WaterDepth:F2}  Local SurfaceY: {waterSurfaceWorldY:F2}");
+        GUI.Label(new Rect(x + 8.0f, y + 56.0f, labelSize.x - 16.0f, 18.0f), $"Group SurfaceY: {groupWaterSurfaceWorldY:F2}  Spread: {groupSurfaceSpread:F4}");
+        GUI.Label(new Rect(x + 8.0f, y + 74.0f, labelSize.x - 16.0f, 18.0f), $"Area: {surfaceArea:F2}  MaxH: {maxWaterHeight:F2}");
+        GUI.Label(new Rect(x + 8.0f, y + 92.0f, labelSize.x - 16.0f, 18.0f), $"Links: {connectedTargets.Count}");
 
         if (!showGroupDebug)
         {
             return;
         }
 
-        GetConnectedGroupDebugStats(out int groupCount, out float groupVolume, out float groupCapacity);
+        RefreshConnectedGroupDebugState();
         float groupFill = groupCapacity <= Epsilon ? 0.0f : groupVolume / groupCapacity;
-        GUI.Label(new Rect(x + 8.0f, y + 92.0f, labelSize.x - 16.0f, 18.0f), $"Group: {groupCount}  {groupVolume:F2}/{groupCapacity:F2}  {groupFill:P0}");
+        GUI.Label(new Rect(x + 8.0f, y + 110.0f, labelSize.x - 16.0f, 18.0f), $"Group: {groupTargetCount}  {groupVolume:F2}/{groupCapacity:F2}  {groupFill:P0}");
     }
 
-    private void GetConnectedGroupDebugStats(out int groupCount, out float groupVolume, out float groupCapacity)
+    private void RefreshConnectedGroupDebugState()
     {
         List<WaterBasinTarget> group = CollectConnectedGroup();
-        groupCount = group.Count;
-        groupVolume = 0.0f;
-        groupCapacity = 0.0f;
+        RefreshDebugStateForGroup(group, GetAverageSurfaceY(group));
+    }
+
+    private static void RefreshDebugStateForGroup(List<WaterBasinTarget> group, float sharedSurfaceY)
+    {
+        if (group.Count == 0)
+        {
+            return;
+        }
+
+        float totalVolume = 0.0f;
+        float totalCapacity = 0.0f;
+        float minSurfaceY = group[0].waterSurfaceWorldY;
+        float maxSurfaceY = group[0].waterSurfaceWorldY;
 
         for (int i = 0; i < group.Count; i++)
         {
             WaterBasinTarget target = group[i];
-            groupVolume += target.currentVolume;
-            groupCapacity += target.Capacity;
+            totalVolume += target.currentVolume;
+            totalCapacity += target.Capacity;
+            minSurfaceY = Mathf.Min(minSurfaceY, target.waterSurfaceWorldY);
+            maxSurfaceY = Mathf.Max(maxSurfaceY, target.waterSurfaceWorldY);
         }
+
+        float spread = maxSurfaceY - minSurfaceY;
+        for (int i = 0; i < group.Count; i++)
+        {
+            WaterBasinTarget target = group[i];
+            target.groupWaterSurfaceWorldY = sharedSurfaceY;
+            target.groupSurfaceSpread = spread;
+            target.groupVolume = totalVolume;
+            target.groupCapacity = totalCapacity;
+            target.groupTargetCount = group.Count;
+        }
+    }
+
+    private static float GetAverageSurfaceY(List<WaterBasinTarget> group)
+    {
+        if (group.Count == 0)
+        {
+            return 0.0f;
+        }
+
+        float sum = 0.0f;
+        for (int i = 0; i < group.Count; i++)
+        {
+            sum += group[i].waterSurfaceWorldY;
+        }
+
+        return sum / group.Count;
     }
 }
