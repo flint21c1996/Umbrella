@@ -202,6 +202,37 @@ public class PlayerUmbrellaController : MonoBehaviour
         SetState(UmbrellaState.Closed);
     }
 
+    // Animation Debug에서 우산의 UpsideDown 상태와 관련 애니메이션 전환을 직접 테스트하기 위한 진입점.
+    // 일반 플레이 입력은 HandleStateInput -> ToggleInvertState 흐름을 그대로 사용한다.
+    public void TurnUmbrellaUpsideDown()
+    {
+        if (!hasUmbrella)
+        {
+            return;
+        }
+
+        SetState(UmbrellaState.UpsideDown);
+    }
+
+    // Animation Debug에서 PourWater 트리거와 물 붓기 상태 전환을 확인하기 위한 진입점.
+    // 실제 시작 가능 여부는 BeginPour 내부 조건을 따르므로 게임플레이 규칙은 우회하지 않는다.
+    public void StartPouring()
+    {
+        if (!hasUmbrella)
+        {
+            return;
+        }
+
+        BeginPour();
+    }
+
+    // Animation Debug 테스트 중 Pouring 상태를 즉시 종료하기 위한 진입점.
+    // 실제 상태 복귀 처리는 기존 EndPour 로직을 그대로 사용한다.
+    public void StopPouring()
+    {
+        EndPour();
+    }
+
     public void AddWater(float amount)
     {
         if (!CanCollectWater || amount <= 0.0f)
