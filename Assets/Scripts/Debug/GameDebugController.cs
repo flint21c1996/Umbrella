@@ -23,6 +23,10 @@ public class GameDebugController : MonoBehaviour
 
     [SerializeField] private PlayerUmbrellaController[] umbrellaControllers;
 
+    // PlayerAnimationController가 그리는 Animation Debug 창의 표시 여부를 함께 제어하기 위한 대상 목록.
+    // 디버그 UI의 실제 내용은 각 PlayerAnimationController가 소유하고, 이 컨트롤러는 표시 상태만 전달한다.
+    [SerializeField] private PlayerAnimationController[] animationControllers;
+
     [Tooltip("우산 상태/F3 패널과 플레이어 우산 Gizmo를 표시한다.")]
     [FormerlySerializedAs("controlUmbrellaDebug")]
     [SerializeField] private bool showUmbrellaDebug = true;
@@ -35,6 +39,10 @@ public class GameDebugController : MonoBehaviour
     [FormerlySerializedAs("controlPuzzleDebug")]
     [SerializeField] private bool showPuzzleDebug = true;
 
+    // Animation Debug 창은 PlayerAnimationController가 직접 그린다.
+    // GameDebugController는 F3 전체 토글과 표시 여부만 조율한다.
+    [SerializeField] private bool showAnimationDebug = true;
+
     public bool ShowDebugOverlay => showDebugOverlay;
     public bool ShowSceneViewGizmos => showSceneViewGizmos;
 
@@ -44,6 +52,7 @@ public class GameDebugController : MonoBehaviour
     private bool lastAppliedUmbrellaDebug;
     private bool lastAppliedWaterTargetDebug;
     private bool lastAppliedPuzzleDebug;
+    private bool lastAppliedAnimationDebug;
 
     private void OnEnable()
     {
@@ -108,7 +117,8 @@ public class GameDebugController : MonoBehaviour
             lastAppliedSceneViewGizmos != showSceneViewGizmos ||
             lastAppliedUmbrellaDebug != showUmbrellaDebug ||
             lastAppliedWaterTargetDebug != showWaterTargetDebug ||
-            lastAppliedPuzzleDebug != showPuzzleDebug)
+            lastAppliedPuzzleDebug != showPuzzleDebug ||
+            lastAppliedAnimationDebug != showAnimationDebug)
         {
             ApplyDebugState(true);
         }
@@ -122,7 +132,8 @@ public class GameDebugController : MonoBehaviour
             lastAppliedSceneViewGizmos == showSceneViewGizmos &&
             lastAppliedUmbrellaDebug == showUmbrellaDebug &&
             lastAppliedWaterTargetDebug == showWaterTargetDebug &&
-            lastAppliedPuzzleDebug == showPuzzleDebug)
+            lastAppliedPuzzleDebug == showPuzzleDebug &&
+            lastAppliedAnimationDebug == showAnimationDebug)
         {
             return;
         }
@@ -133,6 +144,7 @@ public class GameDebugController : MonoBehaviour
         }
 
         ApplyUmbrellaDebugState();
+        ApplyAnimationDebugState();
         UmbrellaWaterTarget.SetDebugOverlayEnabled(showDebugOverlay && showWaterTargetDebug);
         PuzzleDebugOverlay.SetVisible(
             showDebugOverlay && showPuzzleDebug,
@@ -144,11 +156,17 @@ public class GameDebugController : MonoBehaviour
         lastAppliedUmbrellaDebug = showUmbrellaDebug;
         lastAppliedWaterTargetDebug = showWaterTargetDebug;
         lastAppliedPuzzleDebug = showPuzzleDebug;
+        lastAppliedAnimationDebug = showAnimationDebug;
     }
 
     private void RefreshUmbrellaControllers()
     {
         umbrellaControllers = UnityEngine.Object.FindObjectsByType<PlayerUmbrellaController>(
+            FindObjectsInactive.Include);
+
+        // Animation Debug도 F3 전체 디버그 토글에 맞춰 함께 켜고 끌 수 있도록 자동 수집한다.
+        // 실제 애니메이션 상태 계산이나 버튼 처리는 PlayerAnimationController에 남겨둔다.
+        animationControllers = UnityEngine.Object.FindObjectsByType<PlayerAnimationController>(
             FindObjectsInactive.Include);
     }
 
@@ -170,6 +188,27 @@ public class GameDebugController : MonoBehaviour
             controller.SetDebugVisible(
                 showDebugOverlay && showUmbrellaDebug,
                 showSceneViewGizmos && showUmbrellaDebug);
+        }
+    }
+
+    // 수집된 PlayerAnimationController들에게 Animation Debug 창 표시 여부만 전달한다.
+    // 우산 디버그, 퍼즐 디버그처럼 각 시스템의 디버그 UI 소유권은 해당 컴포넌트에 둔다.
+    private void ApplyAnimationDebugState()
+    {
+        if (animationControllers == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < animationControllers.Length; i++)
+        {
+            PlayerAnimationController controller = animationControllers[i];
+            if (controller == null)
+            {
+                continue;
+            }
+
+            controller.SetDebugVisible(showDebugOverlay && showAnimationDebug);
         }
     }
 }
