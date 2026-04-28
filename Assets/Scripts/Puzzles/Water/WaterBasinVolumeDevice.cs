@@ -116,6 +116,26 @@ public class WaterBasinVolumeDevice : MonoBehaviour
         ExecuteExternal(VolumeOperation.Add, amount);
     }
 
+    public void ActivateAdd()
+    {
+        ExecuteExternal(VolumeOperation.Add, amount);
+    }
+
+    public void ActivateRemove()
+    {
+        ExecuteExternal(VolumeOperation.Remove, amount);
+    }
+
+    public void SetAddOperation()
+    {
+        operation = VolumeOperation.Add;
+    }
+
+    public void SetRemoveOperation()
+    {
+        operation = VolumeOperation.Remove;
+    }
+
     [ContextMenu("Remove Once")]
     public void RemoveOnce()
     {
@@ -136,6 +156,33 @@ public class WaterBasinVolumeDevice : MonoBehaviour
     public void RemoveCustom(float customAmount)
     {
         ExecuteExternal(VolumeOperation.Remove, customAmount);
+    }
+
+    [ContextMenu("Fill All")]
+    public void FillAll()
+    {
+        if (target == null)
+        {
+            onDeviceBlocked.Invoke();
+            return;
+        }
+
+        if (!CanExecute())
+        {
+            onDeviceBlocked.Invoke();
+            return;
+        }
+
+        float remainingCapacity = target.GetConnectedGroupCapacity() - target.GetConnectedGroupVolume();
+        if (remainingCapacity <= 0.0f)
+        {
+            onDeviceBlocked.Invoke();
+            return;
+        }
+
+        target.AddWater(remainingCapacity);
+        onVolumeChanged.Invoke();
+        MarkUsed();
     }
 
     [ContextMenu("Drain All")]
