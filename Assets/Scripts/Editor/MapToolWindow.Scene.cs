@@ -23,13 +23,17 @@ public partial class MapToolWindow : EditorWindow
         }
 
         DrawPlacementPreview(currentEvent);
+        DrawPlacementScaleHandle(sceneView);
+        DrawPlacementHeightHandle(sceneView);
         if (showMeshColliderBounds)
         {
             DrawMeshColliderBounds();
         }
         HandleShortcuts(currentEvent);
 
-        bool isPlaceInput = currentEvent.button == 0 && !currentEvent.alt;
+        // Size/Height 편집 중에는 Scene View handle이 좌클릭 드래그를 써야 한다.
+        // 배치 클릭과 겹치면 손잡이를 잡다가 prefab이 찍힐 수 있어서 잠깐 배치를 막는다.
+        bool isPlaceInput = currentEvent.button == 0 && !currentEvent.alt && !editPlacementScaleInScene && !editPlacementHeightInScene;
 
         if (currentEvent.type == EventType.MouseDown &&
             isPlaceInput)
@@ -90,16 +94,14 @@ public partial class MapToolWindow : EditorWindow
             RotateFineRight();
             currentEvent.Use();
         }
-        else if (currentEvent.keyCode == KeyCode.LeftBracket)
+        else if (currentEvent.keyCode == KeyCode.Alpha1 || currentEvent.keyCode == KeyCode.Keypad1 || currentEvent.keyCode == KeyCode.LeftBracket)
         {
-            heightLevel--;
-            Repaint();
+            ChangeHeightOffset(-heightStep);
             currentEvent.Use();
         }
-        else if (currentEvent.keyCode == KeyCode.RightBracket)
+        else if (currentEvent.keyCode == KeyCode.Alpha3 || currentEvent.keyCode == KeyCode.Keypad3 || currentEvent.keyCode == KeyCode.RightBracket)
         {
-            heightLevel++;
-            Repaint();
+            ChangeHeightOffset(heightStep);
             currentEvent.Use();
         }
         else if (currentEvent.keyCode == KeyCode.Delete || currentEvent.keyCode == KeyCode.Backspace)
@@ -139,6 +141,19 @@ public partial class MapToolWindow : EditorWindow
         {
             ClearHoveredFaceAnchor();
             UpdatePreviewVisibility(false);
+            hasLastPreviewTransform = false;
+            return;
+        }
+
+        if (editPlacementScaleInScene && hasScaleEditPose)
+        {
+            DrawLockedScaleEditPreview();
+            return;
+        }
+
+        if (editPlacementHeightInScene && hasHeightEditPose)
+        {
+            DrawLockedHeightEditPreview();
             return;
         }
 
@@ -158,6 +173,7 @@ public partial class MapToolWindow : EditorWindow
             lastPreviewOccupied = false;
             lastHitColliderName = "None";
             lastUsedNeighborSnap = false;
+            hasLastPreviewTransform = false;
             ClearHoveredFaceAnchor();
             UpdatePreviewVisibility(false);
             return;
@@ -182,7 +198,18 @@ public partial class MapToolWindow : EditorWindow
         UpdatePreviewMaterial(lastPreviewOccupied);
         lastPreviewPosition = snappedPosition;
         lastPreviewRotation = placementRotation;
+        hasLastPreviewTransform = true;
         lastUsedNeighborSnap = useNeighborSnap;
+
+        if (editPlacementScaleInScene && !hasScaleEditPose)
+        {
+            CaptureScaleEditPose();
+        }
+
+        if (editPlacementHeightInScene && !hasHeightEditPose)
+        {
+            CaptureHeightEditPose();
+        }
 
         if (showGrid)
         {
@@ -198,6 +225,98 @@ public partial class MapToolWindow : EditorWindow
                 ? $"{selectedPrefab.name} (Occupied)\nHit: {lastHitColliderName}"
                 : $"{selectedPrefab.name}\nHit: {lastHitColliderName}"
         );
+    }
+
+    private void DrawLockedScaleEditPreview()
+    {
+        lastPreviewOccupied = IsCellOccupied(scaleEditPosition);
+
+        UpdatePreviewTransform(scaleEditPosition, scaleEditRotation);
+        UpdatePreviewMaterial(lastPreviewOccupied);
+        lastPreviewPosition = scaleEditPosition;
+        lastPreviewRotation = scaleEditRotation;
+        hasLastPreviewTransform = true;
+
+        if (showGrid)
+        {
+            DrawGrid(scaleEditPosition, scaleEditRotation);
+        }
+
+        Handles.color = new Color(0.2f, 0.9f, 1.0f, 0.9f);
+        Handles.Label(
+            scaleEditPosition + Vector3.up * 0.35f,
+            $"{selectedPrefab.name} (Size Edit)\nMultiplier: {placementScale.x:F2}, {placementScale.y:F2}, {placementScale.z:F2}\nFinal: {GetPlacementLocalScale().ToString("F2")}"
+        );
+    }
+
+    private void DrawPlacementScaleHandle(SceneView sceneView)
+    {
+        if (!editPlacementScaleInScene || selectedPrefab == null || !hasScaleEditPose)
+        {
+            return;
+        }
+
+        EditorGUI.BeginChangeCheck();
+        float handleSize = HandleUtility.GetHandleSize(scaleEditPosition);
+        Vector3 nextLocalScale = Handles.ScaleHandle(GetPlacementLocalScale(), scaleEditPosition, scaleEditRotation, handleSize);
+        if (!EditorGUI.EndChangeCheck())
+        {
+            return;
+        }
+
+        placementScale = ApplyPlacementScaleInput(GetPlacementScaleMultiplierFromLocalScale(nextLocalScale));
+        Repaint();
+        sceneView.Repaint();
+    }
+
+    private void DrawLockedHeightEditPreview()
+    {
+        lastPreviewOccupied = IsCellOccupied(heightEditPosition);
+
+        UpdatePreviewTransform(heightEditPosition, heightEditRotation);
+        UpdatePreviewMaterial(lastPreviewOccupied);
+        lastPreviewPosition = heightEditPosition;
+        lastPreviewRotation = heightEditRotation;
+        hasLastPreviewTransform = true;
+
+        if (showGrid)
+        {
+            DrawGrid(heightEditPosition, heightEditRotation);
+        }
+
+        Handles.color = new Color(0.2f, 0.9f, 1.0f, 0.9f);
+        Handles.Label(
+            heightEditPosition + Vector3.up * 0.45f,
+            $"{selectedPrefab.name} (Height Edit)\nOffset: {GetCurrentHeight():F2}\nNudge: {heightStep:F2}"
+        );
+    }
+
+    private void DrawPlacementHeightHandle(SceneView sceneView)
+    {
+        if (!editPlacementHeightInScene || selectedPrefab == null || !hasHeightEditPose)
+        {
+            return;
+        }
+
+        // 높이 편집은 X/Z 이동이 섞이면 안 된다.
+        // PositionHandle은 카메라 방향 평면 이동까지 허용하므로 Y축 Slider만 사용한다.
+        Handles.color = new Color(0.2f, 0.9f, 1.0f, 0.95f);
+        float handleSize = HandleUtility.GetHandleSize(heightEditPosition);
+        EditorGUI.BeginChangeCheck();
+        Vector3 nextHandlePosition = Handles.Slider(
+            heightEditPosition,
+            Vector3.up,
+            handleSize * 0.85f,
+            Handles.ArrowHandleCap,
+            0.0f);
+        if (!EditorGUI.EndChangeCheck())
+        {
+            return;
+        }
+
+        float yDelta = nextHandlePosition.y - heightEditBaseY;
+        SetHeightOffset(heightEditBaseOffset + yDelta);
+        sceneView.Repaint();
     }
 
     private void DrawGrid(Vector3 centerPosition, Quaternion placementRotation)

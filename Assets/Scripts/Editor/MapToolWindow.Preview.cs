@@ -28,6 +28,7 @@ public partial class MapToolWindow : EditorWindow
 
         previewInstance.name = $"{selectedPrefab.name}_Preview";
         previewInstance.hideFlags = HideFlags.HideAndDontSave;
+        previewInstance.transform.localScale = GetPlacementLocalScale();
 
         foreach (Collider collider in previewInstance.GetComponentsInChildren<Collider>(true))
         {
@@ -53,6 +54,7 @@ public partial class MapToolWindow : EditorWindow
 
         previewInstance.transform.position = position;
         previewInstance.transform.rotation = rotation;
+        previewInstance.transform.localScale = GetPlacementLocalScale();
         UpdatePreviewVisibility(true);
     }
 

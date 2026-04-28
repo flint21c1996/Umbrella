@@ -30,21 +30,41 @@ public partial class MapToolWindow : EditorWindow
 
         foreach (GameObject selectedObject in Selection.gameObjects)
         {
-            Renderer[] renderers = selectedObject.GetComponentsInChildren<Renderer>();
+            ApplyMaterialToObject(selectedObject, selectedMaterial, "Apply Material Preset");
+        }
+    }
 
-            foreach (Renderer renderer in renderers)
+    private void ApplyPlacementMaterial(GameObject targetObject)
+    {
+        if (placementMaterial == null)
+        {
+            return;
+        }
+
+        ApplyMaterialToObject(targetObject, placementMaterial, "Apply Placement Material");
+    }
+
+    private void ApplyMaterialToObject(GameObject targetObject, Material material, string undoName)
+    {
+        if (targetObject == null || material == null)
+        {
+            return;
+        }
+
+        Renderer[] renderers = targetObject.GetComponentsInChildren<Renderer>();
+
+        foreach (Renderer renderer in renderers)
+        {
+            Undo.RecordObject(renderer, undoName);
+            Material[] materials = renderer.sharedMaterials;
+
+            for (int i = 0; i < materials.Length; i++)
             {
-                Undo.RecordObject(renderer, "Apply Material Preset");
-                Material[] materials = renderer.sharedMaterials;
-
-                for (int i = 0; i < materials.Length; i++)
-                {
-                    materials[i] = selectedMaterial;
-                }
-
-                renderer.sharedMaterials = materials;
-                EditorUtility.SetDirty(renderer);
+                materials[i] = material;
             }
+
+            renderer.sharedMaterials = materials;
+            EditorUtility.SetDirty(renderer);
         }
     }
 
@@ -188,6 +208,9 @@ public partial class MapToolWindow : EditorWindow
         // preview는 prefab별로 인스턴스를 재사용하므로,
         // 선택 prefab이 바뀌면 기존 preview를 정리하고 다시 만든다.
         selectedPrefab = prefab;
+        hasLastPreviewTransform = false;
+        hasScaleEditPose = false;
+        hasHeightEditPose = false;
         DestroyPreviewInstance();
         Repaint();
     }

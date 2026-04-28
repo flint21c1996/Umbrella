@@ -57,8 +57,10 @@ public partial class MapToolWindow : EditorWindow
 
         instance.transform.position = snappedPosition;
         instance.transform.rotation = placementRotation;
+        instance.transform.localScale = GetPlacementLocalScale();
 
         ReplacePrimitiveCollidersWithMeshColliders(instance);
+        ApplyPlacementMaterial(instance);
 
         Transform parent = placementParent != null ? placementParent : GetOrCreateRootParent();
         instance.transform.SetParent(parent, true);
@@ -128,11 +130,13 @@ public partial class MapToolWindow : EditorWindow
 
         if (!snapToSurface)
         {
-            Plane plane = new Plane(Vector3.up, new Vector3(0.0f, GetCurrentHeight(), 0.0f));
+            // 마우스 ray를 현재 높이 평면에 직접 쏘면 높이가 바뀔 때 교차점의 X/Z도 카메라 방향으로 밀린다.
+            // 그래서 X/Z 기준점은 월드 기준 바닥 평면에서 고정하고, 높이 오프셋은 Y값에만 따로 적용한다.
+            Plane plane = new Plane(Vector3.up, Vector3.zero);
             if (plane.Raycast(ray, out float enter))
             {
                 Vector3 worldPoint = ray.GetPoint(enter);
-                snappedSurfacePosition = SnapToPlacement(worldPoint);
+                snappedSurfacePosition = SnapToPlacement(new Vector3(worldPoint.x, GetCurrentHeight(), worldPoint.z));
                 surfaceNormal = Vector3.up;
                 lastHitColliderName = "Height Plane";
                 lastSurfaceHitCollider = null;
@@ -248,7 +252,7 @@ public partial class MapToolWindow : EditorWindow
 
     private float GetCurrentHeight()
     {
-        return heightLevel * heightStep;
+        return heightOffset;
     }
 
     private Quaternion GetPlacementRotation(Vector3 surfaceNormal)
@@ -274,6 +278,7 @@ public partial class MapToolWindow : EditorWindow
         }
 
         previewInstance.transform.rotation = placementRotation;
+        previewInstance.transform.localScale = GetPlacementLocalScale();
         previewInstance.transform.position = surfacePosition;
 
         List<Vector3> previewPoints = new List<Vector3>();
