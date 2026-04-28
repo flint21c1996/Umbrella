@@ -43,6 +43,11 @@ public class GameDebugController : MonoBehaviour
     // GameDebugController는 F3 전체 토글과 표시 여부만 조율한다.
     [SerializeField] private bool showAnimationDebug = true;
 
+
+    //물 높낮이에 대한 변화와 제어 기능
+    [Header("Water")]
+    [SerializeField] private bool showWaterBasinDebug = true;
+
     public bool ShowDebugOverlay => showDebugOverlay;
     public bool ShowSceneViewGizmos => showSceneViewGizmos;
 
@@ -51,6 +56,7 @@ public class GameDebugController : MonoBehaviour
     private bool lastAppliedSceneViewGizmos;
     private bool lastAppliedUmbrellaDebug;
     private bool lastAppliedWaterTargetDebug;
+    private bool lastAppliedWaterBasinDebug;
     private bool lastAppliedPuzzleDebug;
     private bool lastAppliedAnimationDebug;
 
@@ -117,6 +123,7 @@ public class GameDebugController : MonoBehaviour
             lastAppliedSceneViewGizmos != showSceneViewGizmos ||
             lastAppliedUmbrellaDebug != showUmbrellaDebug ||
             lastAppliedWaterTargetDebug != showWaterTargetDebug ||
+            lastAppliedWaterBasinDebug != showWaterBasinDebug ||
             lastAppliedPuzzleDebug != showPuzzleDebug ||
             lastAppliedAnimationDebug != showAnimationDebug)
         {
@@ -132,6 +139,7 @@ public class GameDebugController : MonoBehaviour
             lastAppliedSceneViewGizmos == showSceneViewGizmos &&
             lastAppliedUmbrellaDebug == showUmbrellaDebug &&
             lastAppliedWaterTargetDebug == showWaterTargetDebug &&
+            lastAppliedWaterBasinDebug == showWaterBasinDebug &&
             lastAppliedPuzzleDebug == showPuzzleDebug &&
             lastAppliedAnimationDebug == showAnimationDebug)
         {
@@ -146,6 +154,9 @@ public class GameDebugController : MonoBehaviour
         ApplyUmbrellaDebugState();
         ApplyAnimationDebugState();
         UmbrellaWaterTarget.SetDebugOverlayEnabled(showDebugOverlay && showWaterTargetDebug);
+        WaterBasinTarget.SetDebugVisible(
+            showDebugOverlay && showWaterBasinDebug,
+            showSceneViewGizmos && showWaterBasinDebug);
         PuzzleDebugOverlay.SetVisible(
             showDebugOverlay && showPuzzleDebug,
             showSceneViewGizmos && showPuzzleDebug);
@@ -155,6 +166,7 @@ public class GameDebugController : MonoBehaviour
         lastAppliedSceneViewGizmos = showSceneViewGizmos;
         lastAppliedUmbrellaDebug = showUmbrellaDebug;
         lastAppliedWaterTargetDebug = showWaterTargetDebug;
+        lastAppliedWaterBasinDebug = showWaterBasinDebug;
         lastAppliedPuzzleDebug = showPuzzleDebug;
         lastAppliedAnimationDebug = showAnimationDebug;
     }
