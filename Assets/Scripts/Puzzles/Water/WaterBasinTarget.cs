@@ -6,6 +6,8 @@ using UnityEngine;
 public class WaterBasinTarget : MonoBehaviour
 {
     private const float Epsilon = 0.0001f;
+    private static bool debugOverlayEnabled = true;
+    private static bool debugGizmosEnabled = true;
 
     private enum BottomHeightMode
     {
@@ -79,6 +81,12 @@ public class WaterBasinTarget : MonoBehaviour
     public float WaterDepth => Mathf.Max(0.0f, waterSurfaceWorldY - BottomWorldY);
     public float Fill01 => Capacity <= Epsilon ? 0.0f : Mathf.Clamp01(currentVolume / Capacity);
 
+    public static void SetDebugVisible(bool showOverlay, bool showGizmos)
+    {
+        debugOverlayEnabled = showOverlay;
+        debugGizmosEnabled = showGizmos;
+    }
+
     private void Reset()
     {
         CacheUmbrellaTarget();
@@ -148,6 +156,37 @@ public class WaterBasinTarget : MonoBehaviour
         }
 
         SolveConnectedGroup(-amount);
+    }
+
+    public void RemoveAllWater()
+    {
+        SolveConnectedGroup(-GetConnectedGroupVolume());
+    }
+
+    public float GetConnectedGroupVolume()
+    {
+        List<WaterBasinTarget> group = CollectConnectedGroup();
+        float totalVolume = 0.0f;
+
+        for (int i = 0; i < group.Count; i++)
+        {
+            totalVolume += group[i].currentVolume;
+        }
+
+        return totalVolume;
+    }
+
+    public float GetConnectedGroupCapacity()
+    {
+        List<WaterBasinTarget> group = CollectConnectedGroup();
+        float totalCapacity = 0.0f;
+
+        for (int i = 0; i < group.Count; i++)
+        {
+            totalCapacity += group[i].Capacity;
+        }
+
+        return totalCapacity;
     }
 
     public void RedistributeConnected()
@@ -456,7 +495,7 @@ public class WaterBasinTarget : MonoBehaviour
 
     private void OnDrawGizmosSelected()
     {
-        if (!drawGizmos)
+        if (!debugGizmosEnabled || !drawGizmos)
         {
             return;
         }
@@ -499,7 +538,7 @@ public class WaterBasinTarget : MonoBehaviour
 
     private void OnGUI()
     {
-        if (!Application.isPlaying || !showGameViewDebug)
+        if (!Application.isPlaying || !debugOverlayEnabled || !showGameViewDebug)
         {
             return;
         }
