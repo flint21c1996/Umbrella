@@ -7,6 +7,14 @@ public class WaterBasinTarget : MonoBehaviour
 {
     private const float Epsilon = 0.0001f;
 
+    private enum BottomHeightMode
+    {
+        TransformY,
+        ManualWorldY,
+        RendererBoundsMinY,
+        ColliderBoundsMinY
+    }
+
     [Header("Umbrella Adapter")]
     [SerializeField] private UmbrellaWaterTarget umbrellaWaterTarget;
     [SerializeField] private bool findUmbrellaTargetInParent = true;
@@ -15,30 +23,30 @@ public class WaterBasinTarget : MonoBehaviour
     [SerializeField] private bool useUmbrellaTargetAsInput = true;
 
     [Header("Connections")]
-    [Tooltip("Targets connected to this target. Connections are treated as bidirectional while solving.")]
+    [Tooltip("연결된 물 타겟목록")]
     [SerializeField] private List<WaterBasinTarget> connectedTargets = new List<WaterBasinTarget>();
 
     [Header("Volume")]
-    [Tooltip("Horizontal area used by the connected-vessel solver. Larger area needs more volume for the same height.")]
-    [SerializeField] private float surfaceArea = 1.0f;
+    [Tooltip("바닥 면적")]
+    [SerializeField] private float surfaceArea = 1.0f;  //
 
     [Tooltip("Maximum visible/storable water height for this target.")]
-    [SerializeField] private float maxWaterHeight = 1.0f;
+    [SerializeField] private float maxWaterHeight = 1.0f;   //최대 높이
 
-    [SerializeField] private float initialVolume;
+    [SerializeField] private float initialVolume;   //초기 부피
 
     [Header("Height")]
-    [SerializeField] private bool useTransformYAsBottom = true;
-    [SerializeField] private float manualBottomWorldY;
+    [SerializeField] private BottomHeightMode bottomHeightMode = BottomHeightMode.ColliderBoundsMinY;
+    [SerializeField] private float manualBottomWorldY;  //useTransformYAsBottom이 false일 때 바닥으로 사용할 월드 Y 좌표.
 
     [Header("Runtime")]
-    [SerializeField] private float currentVolume;
-    [SerializeField] private float waterSurfaceWorldY;
-    [SerializeField] private float groupWaterSurfaceWorldY;
-    [SerializeField] private float groupSurfaceSpread;
-    [SerializeField] private float groupVolume;
-    [SerializeField] private float groupCapacity;
-    [SerializeField] private int groupTargetCount;
+    [SerializeField] private float currentVolume;   //현재부피
+    [SerializeField] private float waterSurfaceWorldY;  //현재수면높이(월드Y)
+    [SerializeField] private float groupWaterSurfaceWorldY; //연결된 그룹의 수면높이(월드Y)
+    [SerializeField] private float groupSurfaceSpread;  //연결된 그룹의 수면높이 분포. 0이면 모두 같은 높이, 값이 커질수록 높이 차이가 커짐.
+    [SerializeField] private float groupVolume; //연결된 그룹의 총 부피
+    [SerializeField] private float groupCapacity;   //연결된 그룹의 총 용량
+    [SerializeField] private int groupTargetCount;  //연결된 그룹의 타겟 수.
 
     [Header("Debug")]
     [SerializeField] private bool drawGizmos = true;
@@ -65,7 +73,7 @@ public class WaterBasinTarget : MonoBehaviour
     public float GroupVolume => groupVolume;
     public float GroupCapacity => groupCapacity;
     public int GroupTargetCount => groupTargetCount;
-    public float BottomWorldY => useTransformYAsBottom ? transform.position.y : manualBottomWorldY;
+    public float BottomWorldY => GetBottomWorldY();
     public float TopWorldY => BottomWorldY + maxWaterHeight;
     public float Capacity => surfaceArea * maxWaterHeight;
     public float WaterDepth => Mathf.Max(0.0f, waterSurfaceWorldY - BottomWorldY);
@@ -114,7 +122,7 @@ public class WaterBasinTarget : MonoBehaviour
             Mathf.Max(160.0f, labelSize.x),
             Mathf.Max(126.0f, labelSize.y));
 
-        if (useTransformYAsBottom)
+        if (bottomHeightMode == BottomHeightMode.TransformY)
         {
             manualBottomWorldY = transform.position.y;
         }
@@ -177,14 +185,20 @@ public class WaterBasinTarget : MonoBehaviour
 
         totalVolume = Mathf.Clamp(totalVolume, 0.0f, totalCapacity);
 
+        bool anyChanged = false;
         float surfaceY = SolveSurfaceY(group, totalVolume);
         for (int i = 0; i < group.Count; i++)
         {
             WaterBasinTarget target = group[i];
-            target.ApplySolvedState(target.GetVolumeAtSurface(surfaceY), surfaceY);
+            anyChanged |= target.ApplySolvedState(target.GetVolumeAtSurface(surfaceY), surfaceY);
         }
 
         RefreshDebugStateForGroup(group, surfaceY);
+
+        if (anyChanged)
+        {
+            NotifyWaterStateChangedForGroup(group);
+        }
     }
 
     private List<WaterBasinTarget> CollectConnectedGroup()
@@ -289,7 +303,7 @@ public class WaterBasinTarget : MonoBehaviour
         return result;
     }
 
-    private void ApplySolvedState(float solvedVolume, float solvedSurfaceY)
+    private bool ApplySolvedState(float solvedVolume, float solvedSurfaceY)
     {
         float nextVolume = Mathf.Clamp(solvedVolume, 0.0f, Capacity);
         float nextSurfaceY = solvedSurfaceY;
@@ -299,10 +313,7 @@ public class WaterBasinTarget : MonoBehaviour
         currentVolume = nextVolume;
         waterSurfaceWorldY = nextSurfaceY;
 
-        if (changed)
-        {
-            WaterStateChanged?.Invoke();
-        }
+        return changed;
     }
 
     private float GetSurfaceForLocalVolume(float volume)
@@ -313,6 +324,81 @@ public class WaterBasinTarget : MonoBehaviour
         }
 
         return BottomWorldY + Mathf.Clamp(volume / surfaceArea, 0.0f, maxWaterHeight);
+    }
+
+    private float GetBottomWorldY()
+    {
+        switch (bottomHeightMode)
+        {
+            case BottomHeightMode.ManualWorldY:
+                return manualBottomWorldY;
+            case BottomHeightMode.RendererBoundsMinY:
+                return GetRendererBoundsMinY();
+            case BottomHeightMode.ColliderBoundsMinY:
+                return GetColliderBoundsMinY();
+            default:
+                return transform.position.y;
+        }
+    }
+
+    private float GetRendererBoundsMinY()
+    {
+        Renderer[] renderers = GetComponentsInChildren<Renderer>();
+        if (renderers == null || renderers.Length == 0)
+        {
+            return transform.position.y;
+        }
+
+        float minY = renderers[0].bounds.min.y;
+        bool found = false;
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i].GetComponentInParent<WaterBasinVisual>() != null)
+            {
+                continue;
+            }
+
+            if (!found)
+            {
+                minY = renderers[i].bounds.min.y;
+                found = true;
+                continue;
+            }
+
+            minY = Mathf.Min(minY, renderers[i].bounds.min.y);
+        }
+
+        return found ? minY : transform.position.y;
+    }
+
+    private float GetColliderBoundsMinY()
+    {
+        Collider[] colliders = GetComponentsInChildren<Collider>();
+        if (colliders == null || colliders.Length == 0)
+        {
+            return transform.position.y;
+        }
+
+        float minY = colliders[0].bounds.min.y;
+        bool found = false;
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            if (colliders[i].GetComponentInParent<WaterBasinVisual>() != null)
+            {
+                continue;
+            }
+
+            if (!found)
+            {
+                minY = colliders[i].bounds.min.y;
+                found = true;
+                continue;
+            }
+
+            minY = Mathf.Min(minY, colliders[i].bounds.min.y);
+        }
+
+        return found ? minY : transform.position.y;
     }
 
     private void SubscribeUmbrellaTarget()
@@ -504,5 +590,13 @@ public class WaterBasinTarget : MonoBehaviour
         }
 
         return sum / group.Count;
+    }
+
+    private static void NotifyWaterStateChangedForGroup(List<WaterBasinTarget> group)
+    {
+        for (int i = 0; i < group.Count; i++)
+        {
+            group[i].WaterStateChanged?.Invoke();
+        }
     }
 }
