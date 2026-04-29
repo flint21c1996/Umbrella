@@ -10,20 +10,27 @@ public class WaterBasinVolumeDevice : MonoBehaviour
         Remove
     }
 
+    private enum ControlScope
+    {
+        ConnectedGroup,
+        TargetOnly
+    }
+
     [Header("Target")]
     [SerializeField] private WaterBasinTarget target;
 
     [Header("Operation")]
+    [SerializeField] private ControlScope controlScope = ControlScope.ConnectedGroup;
     [SerializeField] private VolumeOperation operation = VolumeOperation.Remove;
     [SerializeField] private float amount = 1.0f;
 
-    [Tooltip("If enabled, this device keeps applying the operation while activated.")]
+    [Tooltip("활성화하면 장치가 켜져 있는 동안 물 추가/제거 동작을 계속 적용합니다.")]
     [SerializeField] private bool continuous;
 
-    [Tooltip("Volume applied per second while Continuous is enabled.")]
+    [Tooltip("연속 동작이 켜져 있을 때 초당 적용할 물의 양입니다.")]
     [SerializeField] private float amountPerSecond = 1.0f;
 
-    [Tooltip("If enabled, Activate can only run once.")]
+    [Tooltip("활성화하면 장치 활성화 동작이 한 번만 실행됩니다.")]
     [SerializeField] private bool oneShot;
 
     [SerializeField] private float cooldown = 0.0f;
@@ -40,6 +47,22 @@ public class WaterBasinVolumeDevice : MonoBehaviour
     public bool Activated => activated;
     public bool Continuous => continuous;
     public bool CanUse => CanExecute();
+    public bool ControlsConnectedGroup => controlScope == ControlScope.ConnectedGroup;
+
+    public void SetTarget(WaterBasinTarget newTarget)
+    {
+        target = newTarget;
+    }
+
+    public void SetConnectedGroupScope()
+    {
+        controlScope = ControlScope.ConnectedGroup;
+    }
+
+    public void SetTargetOnlyScope()
+    {
+        controlScope = ControlScope.TargetOnly;
+    }
 
     private void Reset()
     {
@@ -174,13 +197,26 @@ public class WaterBasinVolumeDevice : MonoBehaviour
         }
 
         float remainingCapacity = target.GetConnectedGroupCapacity() - target.GetConnectedGroupVolume();
+        if (controlScope == ControlScope.TargetOnly)
+        {
+            remainingCapacity = target.Capacity - target.CurrentVolume;
+        }
+
         if (remainingCapacity <= 0.0f)
         {
             onDeviceBlocked.Invoke();
             return;
         }
 
-        target.AddWater(remainingCapacity);
+        if (controlScope == ControlScope.TargetOnly)
+        {
+            target.AddWaterToThisTarget(remainingCapacity);
+        }
+        else
+        {
+            target.AddWater(remainingCapacity);
+        }
+
         onVolumeChanged.Invoke();
         MarkUsed();
     }
@@ -200,7 +236,15 @@ public class WaterBasinVolumeDevice : MonoBehaviour
             return;
         }
 
-        target.RemoveAllWater();
+        if (controlScope == ControlScope.TargetOnly)
+        {
+            target.RemoveAllWaterFromThisTarget();
+        }
+        else
+        {
+            target.RemoveAllWater();
+        }
+
         onVolumeChanged.Invoke();
         MarkUsed();
     }
@@ -234,10 +278,24 @@ public class WaterBasinVolumeDevice : MonoBehaviour
         switch (operation)
         {
             case VolumeOperation.Add:
-                target.AddWater(requestedAmount);
+                if (controlScope == ControlScope.TargetOnly)
+                {
+                    target.AddWaterToThisTarget(requestedAmount);
+                }
+                else
+                {
+                    target.AddWater(requestedAmount);
+                }
                 break;
             case VolumeOperation.Remove:
-                target.RemoveWater(requestedAmount);
+                if (controlScope == ControlScope.TargetOnly)
+                {
+                    target.RemoveWaterFromThisTarget(requestedAmount);
+                }
+                else
+                {
+                    target.RemoveWater(requestedAmount);
+                }
                 break;
         }
 
