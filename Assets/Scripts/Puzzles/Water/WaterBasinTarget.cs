@@ -46,8 +46,9 @@ public class WaterBasinTarget : MonoBehaviour
     [Tooltip("직접 물을 받으면 증가한 물의 양을 그룹에 반영합니다.")]
     [SerializeField] private bool useUmbrellaTargetAsInput = true;
 
-    [Header("Connections")]
-    [Tooltip("연결된 물")]
+    [Header("연결")]
+    [InspectorName("연결된 물 타겟")]
+    [Tooltip("게임 중 실제 연결에 사용하는 물 타겟 목록입니다. 떨어져 있는 타겟도 직접 넣을 수 있습니다.")]
     [SerializeField] private List<WaterBasinTarget> connectedTargets = new List<WaterBasinTarget>();
 
     [Header("Volume")]
@@ -270,8 +271,41 @@ public class WaterBasinTarget : MonoBehaviour
 
     public bool IsConnectedTo(WaterBasinTarget target)
     {
-        return target != null && connectedTargets.Contains(target);
+        if (target == null)
+        {
+            return false;
+        }
+
+        return HasManualConnectionTo(target)
+            || target.HasManualConnectionTo(this);
     }
+
+#if UNITY_EDITOR
+    public bool CanAddConnectedTarget(WaterBasinTarget target)
+    {
+        return target != null
+            && target != this
+            && !connectedTargets.Contains(target);
+    }
+
+    public bool AddConnectedTarget(WaterBasinTarget target)
+    {
+        if (!CanAddConnectedTarget(target))
+        {
+            return false;
+        }
+
+        connectedTargets.Add(target);
+        return true;
+    }
+
+    public int ClearConnectedTargets()
+    {
+        int removedCount = connectedTargets.Count;
+        connectedTargets.Clear();
+        return removedCount;
+    }
+#endif
 
     public float GetVolumeAtSurface(float surfaceWorldY)
     {
@@ -337,7 +371,12 @@ public class WaterBasinTarget : MonoBehaviour
             for (int i = 0; i < allTargets.Length; i++)
             {
                 WaterBasinTarget candidate = allTargets[i];
-                if (candidate != null && candidate.connectedTargets.Contains(current))
+                if (candidate == null || candidate == current)
+                {
+                    continue;
+                }
+
+                if (candidate.HasManualConnectionTo(current))
                 {
                     TryQueueTarget(candidate, visited, queue);
                 }
@@ -345,6 +384,11 @@ public class WaterBasinTarget : MonoBehaviour
         }
 
         return group;
+    }
+
+    private bool HasManualConnectionTo(WaterBasinTarget target)
+    {
+        return target != null && connectedTargets.Contains(target);
     }
 
     private static void TryQueueTarget(
