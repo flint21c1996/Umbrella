@@ -203,6 +203,31 @@ public class WaterBasinTarget : MonoBehaviour
         SolveConnectedGroup(-amount);
     }
 
+    public void SetWaterDepth(float depth)
+    {
+        SetWaterSurfaceWorldY(BottomWorldY + Mathf.Max(0.0f, depth));
+    }
+
+    public void SetWaterSurfaceWorldY(float surfaceWorldY)
+    {
+        List<WaterBasinTarget> group = CollectConnectedGroup();
+        if (group.Count == 0)
+        {
+            return;
+        }
+
+        float currentGroupVolume = 0.0f;
+        float targetGroupVolume = 0.0f;
+        for (int i = 0; i < group.Count; i++)
+        {
+            WaterBasinTarget basinTarget = group[i];
+            currentGroupVolume += basinTarget.currentVolume;
+            targetGroupVolume += basinTarget.GetVolumeAtSurface(surfaceWorldY);
+        }
+
+        SolveConnectedGroup(targetGroupVolume - currentGroupVolume);
+    }
+
     public void AddWaterToThisTarget(float amount)
     {
         if (amount <= Epsilon)
@@ -221,6 +246,16 @@ public class WaterBasinTarget : MonoBehaviour
         }
 
         SetThisTargetVolume(currentVolume - amount);
+    }
+
+    public void SetThisTargetWaterDepth(float depth)
+    {
+        SetThisTargetWaterSurfaceWorldY(BottomWorldY + Mathf.Max(0.0f, depth));
+    }
+
+    public void SetThisTargetWaterSurfaceWorldY(float surfaceWorldY)
+    {
+        SetThisTargetVolume(GetVolumeAtSurface(surfaceWorldY));
     }
 
     public void FillThisTarget()
