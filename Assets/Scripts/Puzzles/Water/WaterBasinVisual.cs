@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [ExecuteAlways]
 [DisallowMultipleComponent]
@@ -12,12 +13,13 @@ public class WaterBasinVisual : MonoBehaviour
     [SerializeField] private Renderer waterRenderer;
 
     [Header("Shape")]
-    [Tooltip("If enabled, X/Z size is derived from the basin target's Surface Area as a square.")]
-    [SerializeField] private bool useTargetSurfaceArea = true;
+    [Tooltip("활성화하면 X/Z 크기를 수조 타겟의 부피 경계에서 가져옵니다.")]
+    [FormerlySerializedAs("useTargetSurfaceArea")]
+    [SerializeField] private bool useTargetVolumeSize = true;
 
     [SerializeField] private Vector2 footprintSize = Vector2.one;
 
-    [Tooltip("Small visual thickness used when the basin has very little water.")]
+    [Tooltip("물이 거의 없을 때 시각적으로 보이도록 사용할 최소 두께입니다.")]
     [SerializeField] private float minVisibleDepth = 0.02f;
 
     [Header("Behavior")]
@@ -140,25 +142,48 @@ public class WaterBasinVisual : MonoBehaviour
     private void ApplyVisualTransform(float depth)
     {
         Vector2 size = GetFootprintSize();
+        Vector3 volumeCenter = basinTarget.VolumeWorldCenter;
         Vector3 worldCenter = new Vector3(
-            basinTarget.transform.position.x,
+            volumeCenter.x,
             basinTarget.BottomWorldY + depth * 0.5f,
-            basinTarget.transform.position.z);
+            volumeCenter.z);
 
         waterVisual.position = worldCenter;
         waterVisual.rotation = basinTarget.transform.rotation;
-        waterVisual.localScale = new Vector3(size.x, depth, size.y);
+        ApplyVisualWorldScale(new Vector3(size.x, depth, size.y));
     }
 
     private Vector2 GetFootprintSize()
     {
-        if (!useTargetSurfaceArea || basinTarget == null)
+        if (!useTargetVolumeSize || basinTarget == null)
         {
             return footprintSize;
         }
 
-        float side = Mathf.Sqrt(Mathf.Max(Epsilon, basinTarget.SurfaceArea));
-        return new Vector2(side, side);
+        Vector3 volumeSize = basinTarget.VolumeWorldSize;
+        return new Vector2(volumeSize.x, volumeSize.z);
+    }
+
+    private void ApplyVisualWorldScale(Vector3 worldScale)
+    {
+        Transform parent = waterVisual.parent;
+        if (parent == null)
+        {
+            waterVisual.localScale = worldScale;
+            return;
+        }
+
+        Vector3 parentScale = parent.lossyScale;
+        waterVisual.localScale = new Vector3(
+            DivideByParentScale(worldScale.x, parentScale.x),
+            DivideByParentScale(worldScale.y, parentScale.y),
+            DivideByParentScale(worldScale.z, parentScale.z));
+    }
+
+    private static float DivideByParentScale(float value, float parentScale)
+    {
+        float denominator = Mathf.Abs(parentScale);
+        return denominator <= Epsilon ? value : value / denominator;
     }
 
     private float GetSmoothingFactor()
