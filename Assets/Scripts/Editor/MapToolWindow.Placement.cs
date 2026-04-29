@@ -20,12 +20,18 @@ public partial class MapToolWindow : EditorWindow
         }
 
         Quaternion placementRotation = GetPlacementRotation(surfaceNormal);
+        Vector3 baseLocalScale = GetPlacementLocalScale();
         bool useNeighborSnap = snapToNeighbor || Event.current.alt;
-        Vector3 snappedPosition = GetAlignedPreviewPosition(surfacePosition, placementRotation, surfaceNormal);
+        Vector3 snappedPosition = GetAlignedPreviewPosition(surfacePosition, placementRotation, surfaceNormal, baseLocalScale);
         if (useNeighborSnap)
         {
             GetNeighborSnappedTransform(snappedPosition, placementRotation, out snappedPosition, out placementRotation);
         }
+
+        Vector3 placementLocalScale = GetRandomizedPlacementLocalScale();
+        float lockedPlacementY = snappedPosition.y;
+        ApplyContactAnchoredScale(ref snappedPosition, placementRotation, baseLocalScale, ref placementLocalScale, HasScaleRandomEnabled());
+        KeepPlacementOnSurface(ref snappedPosition, surfacePosition, surfaceNormal, placementRotation, placementLocalScale, lockedPlacementY);
 
         if (isDragPlacement &&
             lastDragPlacementPosition != Vector3.positiveInfinity &&
@@ -34,7 +40,7 @@ public partial class MapToolWindow : EditorWindow
             return;
         }
 
-        if (IsCellOccupied(snappedPosition))
+        if (IsCellOccupied(snappedPosition, placementRotation, placementLocalScale))
         {
             if (isDragPlacement)
             {
@@ -57,7 +63,7 @@ public partial class MapToolWindow : EditorWindow
 
         instance.transform.position = snappedPosition;
         instance.transform.rotation = placementRotation;
-        instance.transform.localScale = GetPlacementLocalScale();
+        instance.transform.localScale = placementLocalScale;
 
         ReplacePrimitiveCollidersWithMeshColliders(instance);
         ApplyPlacementMaterial(instance);
@@ -269,6 +275,11 @@ public partial class MapToolWindow : EditorWindow
 
     private Vector3 GetAlignedPreviewPosition(Vector3 surfacePosition, Quaternion placementRotation, Vector3 surfaceNormal)
     {
+        return GetAlignedPreviewPosition(surfacePosition, placementRotation, surfaceNormal, GetPlacementLocalScale());
+    }
+
+    private Vector3 GetAlignedPreviewPosition(Vector3 surfacePosition, Quaternion placementRotation, Vector3 surfaceNormal, Vector3 localScale)
+    {
         // preview mesh의 실제 바닥/접촉면이 surface에 닿도록 normal 방향 offset을 계산한다.
         // 중심점만 맞추면 긴 메쉬나 회전된 메쉬가 공중에 뜨는 문제가 생긴다.
         EnsurePreviewInstance();
@@ -278,7 +289,7 @@ public partial class MapToolWindow : EditorWindow
         }
 
         previewInstance.transform.rotation = placementRotation;
-        previewInstance.transform.localScale = GetPlacementLocalScale();
+        previewInstance.transform.localScale = localScale;
         previewInstance.transform.position = surfacePosition;
 
         List<Vector3> previewPoints = new List<Vector3>();
@@ -289,6 +300,20 @@ public partial class MapToolWindow : EditorWindow
 
         float nearestFaceOffset = GetNearestFaceOffsetAlongNormal(previewPoints, surfacePosition, surfaceNormal);
         return surfacePosition + surfaceNormal * nearestFaceOffset;
+    }
+
+    private void KeepPlacementOnSurface(ref Vector3 targetPosition, Vector3 surfacePosition, Vector3 surfaceNormal, Quaternion placementRotation, Vector3 localScale, float fallbackY)
+    {
+        // 랜덤 Y scale이 들어가면 pivot 위치는 같아도 바닥면이 살짝 뜨거나 파고들 수 있다.
+        // 위쪽 표면에 올려놓는 배치라면, 실제 scale 기준으로 다시 바닥면을 맞춰 같은 층에 붙여둔다.
+        if (surfaceNormal.y < 0.5f)
+        {
+            targetPosition.y = fallbackY;
+            return;
+        }
+
+        Vector3 surfaceAlignedPosition = GetAlignedPreviewPosition(surfacePosition, placementRotation, surfaceNormal, localScale);
+        targetPosition.y = surfaceAlignedPosition.y;
     }
 
     private float GetNearestFaceOffsetAlongNormal(List<Vector3> worldPoints, Vector3 origin, Vector3 normal)

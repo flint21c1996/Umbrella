@@ -29,6 +29,7 @@ public partial class MapToolWindow : EditorWindow
     private float neighborAngleSnapThreshold = 10.0f;
     private float faceAssistSnapDistance = 0.2f;
     private Vector3 placementScale = Vector3.one;
+    private Vector3 randomScaleAmount = Vector3.zero;
     private float heightOffset;
     private float currentRotationDegrees;
     private bool placementEnabled = true;
@@ -41,8 +42,13 @@ public partial class MapToolWindow : EditorWindow
     private bool showMeshColliderBounds;
     private bool showAdvancedPlacementOptions;
     private bool uniformPlacementScale = true;
+    private bool randomizeScaleX;
+    private bool randomizeScaleY;
+    private bool randomizeScaleZ;
     private NeighborSnapMode neighborSnapMode = NeighborSnapMode.Face;
     private int previewGridRadius = 12;
+    // Map Tool 옵션이 길어져도 창 아래쪽 항목을 놓치지 않도록 현재 스크롤 위치를 보관한다.
+    private Vector2 scrollPosition;
     private Vector2 lastMousePosition;
     private bool lastPreviewOccupied;
     private bool isDragPlacing;
@@ -99,6 +105,9 @@ public partial class MapToolWindow : EditorWindow
 
     private void OnGUI()
     {
+        // EditorWindow 높이가 작을 때도 모든 배치 옵션을 확인할 수 있게 전체 UI를 스크롤 영역으로 감싼다.
+        scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+
         // 자주 쓰는 블록 prefab은 상단에서 바로 갈아끼우고,
         // 실제 배치 파라미터는 아래 섹션에서 조절하는 흐름으로 구성했다.
         EditorGUILayout.LabelField("프리팹 프리셋", EditorStyles.boldLabel);
@@ -203,6 +212,23 @@ public partial class MapToolWindow : EditorWindow
         {
             EditorGUILayout.LabelField("Prefab Base Scale", GetSelectedPrefabBaseScale().ToString("F2"));
         }
+
+        EditorGUILayout.LabelField(new GUIContent("Scale Random Range", "직접 배치할 때 체크된 축에 랜덤 배율을 적용합니다. 닿아 있는 face가 있으면 그 face는 고정하고 열린 방향으로 크기 변화가 반영됩니다."), EditorStyles.boldLabel);
+        DrawRandomScaleAxisControl(
+            new GUIContent("X", "X축 배율에 랜덤값을 적용합니다."),
+            new GUIContent("Range", "X축 기준 배율에서 위아래로 얼마까지 흔들릴지 정합니다. 예: 0.2면 0.8 ~ 1.2"),
+            ref randomizeScaleX,
+            ref randomScaleAmount.x);
+        DrawRandomScaleAxisControl(
+            new GUIContent("Y", "Y축 배율에 랜덤값을 적용합니다."),
+            new GUIContent("Range", "Y축 기준 배율에서 위아래로 얼마까지 흔들릴지 정합니다. 예: 0.2면 0.8 ~ 1.2"),
+            ref randomizeScaleY,
+            ref randomScaleAmount.y);
+        DrawRandomScaleAxisControl(
+            new GUIContent("Z", "Z축 배율에 랜덤값을 적용합니다."),
+            new GUIContent("Range", "Z축 기준 배율에서 위아래로 얼마까지 흔들릴지 정합니다. 예: 0.2면 0.8 ~ 1.2"),
+            ref randomizeScaleZ,
+            ref randomScaleAmount.z);
 
         using (new EditorGUILayout.HorizontalScope())
         {
@@ -357,10 +383,28 @@ public partial class MapToolWindow : EditorWindow
         // 빠르게 확인할 수 있게 최소 정보만 노출한다.
         EditorGUILayout.LabelField("Height Offset", GetCurrentHeight().ToString("F2"));
         EditorGUILayout.LabelField("Current Rotation", $"{currentRotationDegrees:F1}도");
+        EditorGUILayout.LabelField("Scale Random", GetScaleRandomSummary());
         EditorGUILayout.LabelField("Preview Occupied", lastPreviewOccupied ? "사용 중" : "비어 있음");
         EditorGUILayout.LabelField("Current Hit Collider", lastHitColliderName);
         EditorGUILayout.LabelField("Hovered Face", hasHoveredFaceAnchor && hoveredFaceCollider != null ? hoveredFaceCollider.name : "None");
         EditorGUILayout.LabelField("Recent Placements", recentPlacements.Count.ToString());
+
+        EditorGUILayout.EndScrollView();
+    }
+
+    private void DrawRandomScaleAxisControl(GUIContent toggleLabel, GUIContent amountLabel, ref bool enabled, ref float amount)
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            enabled = EditorGUILayout.ToggleLeft(toggleLabel, enabled, GUILayout.Width(42.0f));
+
+            using (new EditorGUI.DisabledScope(!enabled))
+            {
+                amount = Mathf.Max(0.0f, EditorGUILayout.FloatField(amountLabel, amount));
+            }
+
+            GUILayout.Label($"±{amount:F2}", GUILayout.Width(70.0f));
+        }
     }
 
     private Vector3 SanitizePlacementScale(Vector3 scale)
@@ -423,6 +467,55 @@ public partial class MapToolWindow : EditorWindow
         // placementScale은 최종 localScale이 아니라 prefab 기본 scale에 곱하는 배율이다.
         // 그래야 Project 창에서 직접 끌어놓은 크기와 Map Tool로 찍은 기본 크기가 같아진다.
         return Vector3.Scale(GetSelectedPrefabBaseScale(), placementScale);
+    }
+
+    private Vector3 GetRandomizedPlacementLocalScale()
+    {
+        // Preview는 기준 크기를 보여주고, 실제 배치 순간에만 랜덤 배율을 한 번 뽑는다.
+        // 그래야 마우스를 움직일 때 preview가 계속 흔들리지 않고, 찍힌 결과만 자연스럽게 달라진다.
+        return Vector3.Scale(GetSelectedPrefabBaseScale(), GetRandomizedPlacementScaleMultiplier());
+    }
+
+    private Vector3 GetRandomizedPlacementScaleMultiplier()
+    {
+        Vector3 randomizedScale = placementScale;
+
+        if (randomizeScaleX)
+        {
+            randomizedScale.x += UnityEngine.Random.Range(-randomScaleAmount.x, randomScaleAmount.x);
+        }
+
+        if (randomizeScaleY)
+        {
+            randomizedScale.y += UnityEngine.Random.Range(-randomScaleAmount.y, randomScaleAmount.y);
+        }
+
+        if (randomizeScaleZ)
+        {
+            randomizedScale.z += UnityEngine.Random.Range(-randomScaleAmount.z, randomScaleAmount.z);
+        }
+
+        return SanitizePlacementScale(randomizedScale);
+    }
+
+    private string GetScaleRandomSummary()
+    {
+        if (!HasScaleRandomEnabled())
+        {
+            return "Off";
+        }
+
+        return $"X:{GetRandomAxisSummary(randomizeScaleX, randomScaleAmount.x)} Y:{GetRandomAxisSummary(randomizeScaleY, randomScaleAmount.y)} Z:{GetRandomAxisSummary(randomizeScaleZ, randomScaleAmount.z)}";
+    }
+
+    private string GetRandomAxisSummary(bool enabled, float amount)
+    {
+        return enabled ? $"±{amount:F2}" : "-";
+    }
+
+    private bool HasScaleRandomEnabled()
+    {
+        return randomizeScaleX || randomizeScaleY || randomizeScaleZ;
     }
 
     private Vector3 GetPlacementScaleMultiplierFromLocalScale(Vector3 localScale)

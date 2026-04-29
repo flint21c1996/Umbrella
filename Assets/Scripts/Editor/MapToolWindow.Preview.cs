@@ -46,6 +46,11 @@ public partial class MapToolWindow : EditorWindow
 
     private void UpdatePreviewTransform(Vector3 position, Quaternion rotation)
     {
+        UpdatePreviewTransform(position, rotation, GetPlacementLocalScale());
+    }
+
+    private void UpdatePreviewTransform(Vector3 position, Quaternion rotation, Vector3 localScale)
+    {
         EnsurePreviewInstance();
         if (previewInstance == null)
         {
@@ -54,7 +59,7 @@ public partial class MapToolWindow : EditorWindow
 
         previewInstance.transform.position = position;
         previewInstance.transform.rotation = rotation;
-        previewInstance.transform.localScale = GetPlacementLocalScale();
+        previewInstance.transform.localScale = localScale;
         UpdatePreviewVisibility(true);
     }
 

@@ -192,9 +192,14 @@ public partial class MapToolWindow : EditorWindow
             ClearHoveredFaceAnchor();
         }
 
-        lastPreviewOccupied = IsCellOccupied(snappedPosition);
+        Vector3 previewLocalScale = GetPlacementLocalScale();
+        float lockedPreviewY = snappedPosition.y;
+        ApplyContactAnchoredScale(ref snappedPosition, placementRotation, previewLocalScale, ref previewLocalScale, HasScaleRandomEnabled());
+        snappedPosition.y = lockedPreviewY;
 
-        UpdatePreviewTransform(snappedPosition, placementRotation);
+        lastPreviewOccupied = IsCellOccupied(snappedPosition, placementRotation, previewLocalScale);
+
+        UpdatePreviewTransform(snappedPosition, placementRotation, previewLocalScale);
         UpdatePreviewMaterial(lastPreviewOccupied);
         lastPreviewPosition = snappedPosition;
         lastPreviewRotation = placementRotation;
@@ -229,7 +234,7 @@ public partial class MapToolWindow : EditorWindow
 
     private void DrawLockedScaleEditPreview()
     {
-        lastPreviewOccupied = IsCellOccupied(scaleEditPosition);
+        lastPreviewOccupied = IsCellOccupied(scaleEditPosition, scaleEditRotation, GetPlacementLocalScale());
 
         UpdatePreviewTransform(scaleEditPosition, scaleEditRotation);
         UpdatePreviewMaterial(lastPreviewOccupied);
@@ -271,7 +276,7 @@ public partial class MapToolWindow : EditorWindow
 
     private void DrawLockedHeightEditPreview()
     {
-        lastPreviewOccupied = IsCellOccupied(heightEditPosition);
+        lastPreviewOccupied = IsCellOccupied(heightEditPosition, heightEditRotation, GetPlacementLocalScale());
 
         UpdatePreviewTransform(heightEditPosition, heightEditRotation);
         UpdatePreviewMaterial(lastPreviewOccupied);
