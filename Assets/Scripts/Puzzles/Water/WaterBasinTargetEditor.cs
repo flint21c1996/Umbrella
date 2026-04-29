@@ -14,17 +14,17 @@ public class WaterBasinTargetEditor : Editor
         EditorGUILayout.Space(8.0f);
         EditorGUILayout.LabelField("물 연결 제작 도구", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
-            "인접 자동 연결은 에디터에서 Connected Targets를 채우는 작업입니다. 플레이 중에는 저장된 연결 목록만 사용합니다.",
+            "자동 연결은 에디터에서 탐색 거리 안의 WaterBasinTarget을 찾아 Connected Targets를 채우는 작업입니다. 플레이 중에는 저장된 연결 목록만 사용합니다.",
             MessageType.Info);
 
-        if (GUILayout.Button("검사 중인 대상에 인접 연결 추가"))
+        if (GUILayout.Button("검사 중인 대상에 자동 연결 추가"))
         {
-            WaterBasinTargetEditorConnectionTool.AddAdjacentConnections(GetInspectorTargets(), true);
+            WaterBasinTargetEditorConnectionTool.AddAutoConnections(GetInspectorTargets(), true);
         }
 
-        if (GUILayout.Button("씬 전체에 인접 연결 추가"))
+        if (GUILayout.Button("씬 전체에 자동 연결 추가"))
         {
-            WaterBasinTargetEditorConnectionTool.AddAdjacentConnections(
+            WaterBasinTargetEditorConnectionTool.AddAutoConnections(
                 UnityEngine.Object.FindObjectsByType<WaterBasinTarget>(),
                 true);
         }
@@ -98,7 +98,7 @@ internal static class WaterBasinTargetSceneDebugDrawer
             for (int candidateIndex = 0; candidateIndex < allTargets.Length; candidateIndex++)
             {
                 WaterBasinTarget candidate = allTargets[candidateIndex];
-                if (candidate != null && WaterBasinTargetEditorConnectionTool.AreTargetsAdjacent(source, candidate))
+                if (candidate != null && WaterBasinTargetEditorConnectionTool.AreTargetsInAutoConnectionRange(source, candidate))
                 {
                     Handles.DrawLine(source.transform.position, candidate.transform.position);
                 }
@@ -173,26 +173,24 @@ internal static class WaterBasinTargetSceneDebugDrawer
 
 internal static class WaterBasinTargetEditorConnectionTool
 {
-    private const float Epsilon = 0.0001f;
-    private const float AdjacentConnectionTolerance = 0.02f;
     private const string UndoName = "물 연결 편집";
 
-    [MenuItem("Tools/Water Basin/선택 대상 인접 연결 추가")]
-    private static void AddAdjacentConnectionsToSelection()
+    [MenuItem("Tools/Water Basin/선택 대상 자동 연결 추가")]
+    private static void AddAutoConnectionsToSelection()
     {
-        AddAdjacentConnections(GetSelectedTargets(), true);
+        AddAutoConnections(GetSelectedTargets(), true);
     }
 
-    [MenuItem("Tools/Water Basin/선택 대상 인접 연결 추가", true)]
-    private static bool CanAddAdjacentConnectionsToSelection()
+    [MenuItem("Tools/Water Basin/선택 대상 자동 연결 추가", true)]
+    private static bool CanAddAutoConnectionsToSelection()
     {
         return GetSelectedTargets().Length > 0;
     }
 
-    [MenuItem("Tools/Water Basin/씬 전체 인접 연결 추가")]
-    private static void AddAdjacentConnectionsToScene()
+    [MenuItem("Tools/Water Basin/씬 전체 자동 연결 추가")]
+    private static void AddAutoConnectionsToScene()
     {
-        AddAdjacentConnections(UnityEngine.Object.FindObjectsByType<WaterBasinTarget>(), true);
+        AddAutoConnections(UnityEngine.Object.FindObjectsByType<WaterBasinTarget>(), true);
     }
 
     [MenuItem("Tools/Water Basin/선택 대상 연결 비우기")]
@@ -207,7 +205,7 @@ internal static class WaterBasinTargetEditorConnectionTool
         return GetSelectedTargets().Length > 0;
     }
 
-    public static int AddAdjacentConnections(WaterBasinTarget[] sourceTargets, bool showLog)
+    public static int AddAutoConnections(WaterBasinTarget[] sourceTargets, bool showLog)
     {
         WaterBasinTarget[] uniqueSources = GetUniqueTargets(sourceTargets);
         WaterBasinTarget[] allTargets = UnityEngine.Object.FindObjectsByType<WaterBasinTarget>();
@@ -226,7 +224,7 @@ internal static class WaterBasinTargetEditorConnectionTool
                 WaterBasinTarget candidate = allTargets[candidateIndex];
                 if (candidate == null
                     || candidate == source
-                    || !AreTargetsAdjacent(source, candidate))
+                    || !AreTargetsInAutoConnectionRange(source, candidate))
                 {
                     continue;
                 }
@@ -245,13 +243,13 @@ internal static class WaterBasinTargetEditorConnectionTool
 
         if (showLog)
         {
-            Debug.Log($"WaterBasinTarget 인접 연결 {addedCount}개를 Connected Targets에 추가했습니다.");
+            Debug.Log($"WaterBasinTarget 자동 연결 {addedCount}개를 Connected Targets에 추가했습니다.");
         }
 
         return addedCount;
     }
 
-    public static bool AreTargetsAdjacent(WaterBasinTarget first, WaterBasinTarget second)
+    public static bool AreTargetsInAutoConnectionRange(WaterBasinTarget first, WaterBasinTarget second)
     {
         if (first == null || second == null || first == second)
         {
@@ -260,7 +258,8 @@ internal static class WaterBasinTargetEditorConnectionTool
 
         Bounds firstBounds = new Bounds(first.VolumeWorldCenter, first.VolumeWorldSize);
         Bounds secondBounds = new Bounds(second.VolumeWorldCenter, second.VolumeWorldSize);
-        return AreVolumeBoundsAdjacent(firstBounds, secondBounds, AdjacentConnectionTolerance);
+        return GetBoundsDistance(firstBounds, secondBounds)
+            <= GameDebugController.WaterBasinAutoConnectionSearchDistance;
     }
 
     public static void ClearConnectionsWithConfirm(WaterBasinTarget[] targets)
@@ -318,37 +317,35 @@ internal static class WaterBasinTargetEditorConnectionTool
         return true;
     }
 
-    private static bool AreVolumeBoundsAdjacent(Bounds first, Bounds second, float tolerance)
+    private static float GetBoundsDistance(Bounds first, Bounds second)
     {
-        bool xTouching = AreRangesTouching(first.min.x, first.max.x, second.min.x, second.max.x, tolerance);
-        bool zTouching = AreRangesTouching(first.min.z, first.max.z, second.min.z, second.max.z, tolerance);
-        bool xOverlapping = GetRangeOverlap(first.min.x, first.max.x, second.min.x, second.max.x) > Epsilon;
-        bool yOverlapping = GetRangeOverlap(first.min.y, first.max.y, second.min.y, second.max.y) > Epsilon;
-        bool zOverlapping = GetRangeOverlap(first.min.z, first.max.z, second.min.z, second.max.z) > Epsilon;
+        float xDistance = GetRangeDistance(first.min.x, first.max.x, second.min.x, second.max.x);
+        float yDistance = GetRangeDistance(first.min.y, first.max.y, second.min.y, second.max.y);
+        float zDistance = GetRangeDistance(first.min.z, first.max.z, second.min.z, second.max.z);
 
-        return yOverlapping
-            && ((xTouching && zOverlapping)
-                || (zTouching && xOverlapping));
+        return Mathf.Sqrt(
+            xDistance * xDistance
+            + yDistance * yDistance
+            + zDistance * zDistance);
     }
 
-    private static bool AreRangesTouching(
-        float firstMin,
-        float firstMax,
-        float secondMin,
-        float secondMax,
-        float tolerance)
-    {
-        return Mathf.Abs(firstMax - secondMin) <= tolerance
-            || Mathf.Abs(secondMax - firstMin) <= tolerance;
-    }
-
-    private static float GetRangeOverlap(
+    private static float GetRangeDistance(
         float firstMin,
         float firstMax,
         float secondMin,
         float secondMax)
     {
-        return Mathf.Min(firstMax, secondMax) - Mathf.Max(firstMin, secondMin);
+        if (firstMax < secondMin)
+        {
+            return secondMin - firstMax;
+        }
+
+        if (secondMax < firstMin)
+        {
+            return firstMin - secondMax;
+        }
+
+        return 0.0f;
     }
 
     private static WaterBasinTarget[] GetSelectedTargets()
