@@ -17,8 +17,8 @@ public partial class MapToolWindow : EditorWindow
     private bool TryGetFaceAnchorTransform(Vector3 targetPosition, Quaternion placementRotation, out Vector3 snappedPosition, out Quaternion snappedRotation)
     {
         // Face 모드의 핵심 흐름:
-        // 1) anchor가 될 MeshCollider face를 찾고
-        // 2) preview를 그 면에 밀착시킨 뒤
+        // 1) anchor가 될 MeshCollider face를 찾고,
+        // 2) preview를 그 면에 밀착시킨 뒤,
         // 3) face plane 안에서 추가 정렬을 수행한다.
         EnsurePreviewInstance();
         if (previewInstance == null)
@@ -163,7 +163,7 @@ public partial class MapToolWindow : EditorWindow
 
     private bool TryFindBestFaceAnchorHit(Vector3 previewCenter, float searchDistance, Quaternion placementRotation, out RaycastHit bestHit)
     {
-        // preview 주변 여섯 방향으로 ray를 쏴서,
+        // preview 주변 6방향으로 ray를 쏴서,
         // 각 방향에서 가장 앞에 있는 유효한 MeshCollider face만 후보로 본다.
         Vector3 rightAxis = placementRotation * Vector3.right;
         Vector3 forwardAxis = placementRotation * Vector3.forward;

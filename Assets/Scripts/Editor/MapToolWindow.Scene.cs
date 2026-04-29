@@ -94,12 +94,12 @@ public partial class MapToolWindow : EditorWindow
             RotateFineRight();
             currentEvent.Use();
         }
-        else if (currentEvent.keyCode == KeyCode.Alpha1 || currentEvent.keyCode == KeyCode.Keypad1 || currentEvent.keyCode == KeyCode.LeftBracket)
+        else if (currentEvent.keyCode == KeyCode.Alpha1 || currentEvent.keyCode == KeyCode.Keypad1)
         {
             ChangeHeightOffset(-heightStep);
             currentEvent.Use();
         }
-        else if (currentEvent.keyCode == KeyCode.Alpha3 || currentEvent.keyCode == KeyCode.Keypad3 || currentEvent.keyCode == KeyCode.RightBracket)
+        else if (currentEvent.keyCode == KeyCode.Alpha3 || currentEvent.keyCode == KeyCode.Keypad3)
         {
             ChangeHeightOffset(heightStep);
             currentEvent.Use();

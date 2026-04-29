@@ -6,9 +6,10 @@ public partial class MapToolWindow : EditorWindow
 {
     private void GetNeighborSnappedTransform(Vector3 targetPosition, Quaternion placementRotation, out Vector3 snappedPosition, out Quaternion snappedRotation)
     {
-        // Neighbor snap은 mode별로 성격이 다르다.
-        // Face는 face anchor 흐름을 타고, Edge는 두 축 strict 정렬,
-        // Vertex는 현재 축 기반 fallback을 유지한다.
+        // Neighbor Snap은 mode별로 다른 기준을 사용한다.
+        // Face는 MeshCollider의 실제 면을 anchor로 잡고,
+        // Edge는 같은 support plane 위에서 두 축을 맞추는 엄격한 정렬을 시도한다.
+        // Vertex는 현재 축 기반 snap fallback을 그대로 사용한다.
         if (neighborSnapMode == NeighborSnapMode.Face)
         {
             if (TryGetFaceAnchorTransform(targetPosition, placementRotation, out snappedPosition, out snappedRotation))
@@ -35,8 +36,8 @@ public partial class MapToolWindow : EditorWindow
 
     private bool TryGetStrictPlaneNeighborSnappedTransform(Vector3 targetPosition, Quaternion placementRotation, out Vector3 snappedPosition, out Quaternion snappedRotation)
     {
-        // Edge 모드는 support plane 위에서 primary / secondary 두 축을 동시에 맞춰
-        // "면은 붙었는데 코너가 안 맞는" 상태를 줄이는 용도다.
+        // Edge 모드는 support plane 위에서 primary / secondary 두 축을 동시에 맞춘다.
+        // 면은 붙었지만 코너가 어긋나는 상태를 줄이기 위한 보정이다.
         EnsurePreviewInstance();
         if (previewInstance == null)
         {
@@ -135,7 +136,7 @@ public partial class MapToolWindow : EditorWindow
         out Vector3 candidatePosition,
         out float candidateScore)
     {
-        // 같은 plane 위에서 두 축 delta를 각각 찾아 더하는 단순한 strict edge 정렬.
+        // 같은 plane 위에서 두 축의 delta를 각각 찾아 더하는 단순한 strict edge 정렬.
         candidatePosition = targetPosition;
         candidateScore = 0.0f;
 
