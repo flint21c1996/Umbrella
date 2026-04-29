@@ -34,7 +34,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 5716140482700918649}
+  - {fileID: 4000008751053833330}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &3451118167685721567
@@ -154,6 +154,7 @@ MonoBehaviour:
   connectedTargets:
   - {fileID: 5849152312646915790}
   - {fileID: 0}
+  volumeSizeMode: 3
   surfaceArea: 1
   maxWaterHeight: 1
   initialVolume: 0
@@ -171,7 +172,7 @@ MonoBehaviour:
   showGameViewDebug: 1
   showGroupDebug: 1
   labelOffset: {x: 0, y: 1.25, z: 0}
-  labelSize: {x: 220, y: 126}
+  labelSize: {x: 220, y: 148}
   debugColor: {r: 0.1, g: 0.45, b: 1, a: 0.35}
 --- !u!1 &7449806308852892147
 GameObject:
@@ -201,11 +202,11 @@ Transform:
   m_GameObject: {fileID: 7449806308852892147}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.01, z: 0}
-  m_LocalScale: {x: 1, y: 0.02, z: 1}
+  m_LocalPosition: {x: 0, y: -0.25, z: 0}
+  m_LocalScale: {x: 1, y: 0.5, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 6255856084710861779}
+  m_Father: {fileID: 4000008751053833330}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &3654829944540738629
 MeshFilter:
@@ -222,7 +223,7 @@ MeshRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7449806308852892147}
-  m_Enabled: 0
+  m_Enabled: 1
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
@@ -277,9 +278,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::WaterBasinVisual
   basinTarget: {fileID: 5849152312646915790}
-  waterVisual: {fileID: 5716140482700918649}
+  visualRoot: {fileID: 6255856084710861779}
+  fillMesh: {fileID: 5716140482700918649}
   waterRenderer: {fileID: 4591005235567072136}
-  useTargetSurfaceArea: 1
+  useTargetVolumeSize: 1
   footprintSize: {x: 1, y: 1}
   minVisibleDepth: 0.02
   hideWhenEmpty: 1
@@ -288,5 +290,37 @@ MonoBehaviour:
   smoothingSpeed: 12
   tintMaterial: 1
   waterColor: {r: 0.1, g: 0.55, b: 1, a: 0.55}
-  visibleDepth: 0
+  visibleDepth: 0.5
   visualSurfaceWorldY: 0
+--- !u!1 &8003777955023842713
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4000008751053833330}
+  m_Layer: 0
+  m_Name: WaterVisualRoot
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4000008751053833330
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8003777955023842713}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 5716140482700918649}
+  m_Father: {fileID: 6255856084710861779}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}

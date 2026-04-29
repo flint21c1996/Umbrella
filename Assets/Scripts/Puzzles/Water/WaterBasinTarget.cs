@@ -108,6 +108,8 @@ public class WaterBasinTarget : MonoBehaviour
 
     public UmbrellaWaterTarget UmbrellaTarget => umbrellaWaterTarget;
     public IReadOnlyList<WaterBasinTarget> ConnectedTargets => connectedTargets;
+    public Vector3 VolumeLocalSize => GetVolumeLocalSize();
+    public Vector3 VolumeLocalCenter => GetVolumeLocalCenter();
     public Vector3 VolumeWorldSize => GetVolumeWorldSize();
     public Vector3 VolumeWorldCenter => GetVolumeWorldCenter();
     public float SurfaceArea => GetSurfaceArea();
@@ -172,7 +174,7 @@ public class WaterBasinTarget : MonoBehaviour
         currentVolume = Mathf.Clamp(currentVolume, 0.0f, Capacity);
         labelSize = new Vector2(
             Mathf.Max(160.0f, labelSize.x),
-            Mathf.Max(126.0f, labelSize.y));
+            Mathf.Max(148.0f, labelSize.y));
 
         if (bottomHeightMode == BottomHeightMode.TransformY)
         {
@@ -475,32 +477,56 @@ public class WaterBasinTarget : MonoBehaviour
             case VolumeSizeMode.TransformScale:
                 return ClampVolumeSize(transform.lossyScale);
             case VolumeSizeMode.RendererBounds:
-                return TryGetRendererBounds(out Bounds rendererBounds)
-                    ? ClampVolumeSize(rendererBounds.size)
+                return TryGetRendererLocalBounds(out Bounds rendererBounds)
+                    ? ScaleLocalSizeToWorld(rendererBounds.size)
                     : GetManualVolumeSize();
             case VolumeSizeMode.ColliderBounds:
-                return TryGetColliderBounds(out Bounds colliderBounds)
-                    ? ClampVolumeSize(colliderBounds.size)
+                return TryGetColliderLocalBounds(out Bounds colliderBounds)
+                    ? ScaleLocalSizeToWorld(colliderBounds.size)
                     : GetManualVolumeSize();
             default:
                 return GetManualVolumeSize();
         }
     }
 
+    private Vector3 GetVolumeLocalSize()
+    {
+        switch (volumeSizeMode)
+        {
+            case VolumeSizeMode.TransformScale:
+                return Vector3.one;
+            case VolumeSizeMode.RendererBounds:
+                return TryGetRendererLocalBounds(out Bounds rendererBounds)
+                    ? ClampVolumeSize(rendererBounds.size)
+                    : GetManualVolumeSize();
+            case VolumeSizeMode.ColliderBounds:
+                return TryGetColliderLocalBounds(out Bounds colliderBounds)
+                    ? ClampVolumeSize(colliderBounds.size)
+                    : GetManualVolumeSize();
+            default:
+                return ScaleWorldSizeToLocal(GetManualVolumeSize());
+        }
+    }
+
     private Vector3 GetVolumeWorldCenter()
+    {
+        return transform.TransformPoint(GetVolumeLocalCenter());
+    }
+
+    private Vector3 GetVolumeLocalCenter()
     {
         switch (volumeSizeMode)
         {
             case VolumeSizeMode.RendererBounds:
-                return TryGetRendererBounds(out Bounds rendererBounds)
+                return TryGetRendererLocalBounds(out Bounds rendererBounds)
                     ? rendererBounds.center
-                    : transform.position;
+                    : Vector3.zero;
             case VolumeSizeMode.ColliderBounds:
-                return TryGetColliderBounds(out Bounds colliderBounds)
+                return TryGetColliderLocalBounds(out Bounds colliderBounds)
                     ? colliderBounds.center
-                    : transform.position;
+                    : Vector3.zero;
             default:
-                return transform.position;
+                return Vector3.zero;
         }
     }
 
@@ -516,6 +542,30 @@ public class WaterBasinTarget : MonoBehaviour
             Mathf.Max(Epsilon, Mathf.Abs(size.x)),
             Mathf.Max(Epsilon, Mathf.Abs(size.y)),
             Mathf.Max(Epsilon, Mathf.Abs(size.z)));
+    }
+
+    private Vector3 ScaleLocalSizeToWorld(Vector3 localSize)
+    {
+        Vector3 scale = transform.lossyScale;
+        return new Vector3(
+            Mathf.Max(Epsilon, Mathf.Abs(localSize.x * scale.x)),
+            Mathf.Max(Epsilon, Mathf.Abs(localSize.y * scale.y)),
+            Mathf.Max(Epsilon, Mathf.Abs(localSize.z * scale.z)));
+    }
+
+    private Vector3 ScaleWorldSizeToLocal(Vector3 worldSize)
+    {
+        Vector3 scale = transform.lossyScale;
+        return new Vector3(
+            DivideByScale(worldSize.x, scale.x),
+            DivideByScale(worldSize.y, scale.y),
+            DivideByScale(worldSize.z, scale.z));
+    }
+
+    private static float DivideByScale(float value, float scale)
+    {
+        float denominator = Mathf.Abs(scale);
+        return denominator <= Epsilon ? value : Mathf.Max(Epsilon, value / denominator);
     }
 
     private float GetBottomWorldY()
@@ -535,22 +585,22 @@ public class WaterBasinTarget : MonoBehaviour
 
     private float GetRendererBoundsMinY()
     {
-        return TryGetRendererBounds(out Bounds bounds)
-            ? bounds.min.y
+        return TryGetRendererLocalBounds(out Bounds bounds)
+            ? GetLocalBoundsWorldMinY(bounds)
             : transform.position.y;
     }
 
     private float GetColliderBoundsMinY()
     {
-        return TryGetColliderBounds(out Bounds bounds)
-            ? bounds.min.y
+        return TryGetColliderLocalBounds(out Bounds bounds)
+            ? GetLocalBoundsWorldMinY(bounds)
             : transform.position.y;
     }
 
-    private bool TryGetRendererBounds(out Bounds bounds)
+    private bool TryGetRendererLocalBounds(out Bounds bounds)
     {
         Renderer[] renderers = GetComponentsInChildren<Renderer>();
-        bounds = new Bounds(transform.position, Vector3.zero);
+        bounds = new Bounds(Vector3.zero, Vector3.zero);
         bool found = false;
 
         for (int i = 0; i < renderers.Length; i++)
@@ -563,21 +613,21 @@ public class WaterBasinTarget : MonoBehaviour
 
             if (!found)
             {
-                bounds = renderer.bounds;
+                bounds = CreateLocalBounds(renderer.localBounds, renderer.transform.localToWorldMatrix);
                 found = true;
                 continue;
             }
 
-            bounds.Encapsulate(renderer.bounds);
+            EncapsulateLocalBounds(ref bounds, renderer.localBounds, renderer.transform.localToWorldMatrix);
         }
 
         return found;
     }
 
-    private bool TryGetColliderBounds(out Bounds bounds)
+    private bool TryGetColliderLocalBounds(out Bounds bounds)
     {
         Collider[] colliders = GetComponentsInChildren<Collider>();
-        bounds = new Bounds(transform.position, Vector3.zero);
+        bounds = new Bounds(Vector3.zero, Vector3.zero);
         bool found = false;
 
         for (int i = 0; i < colliders.Length; i++)
@@ -590,27 +640,140 @@ public class WaterBasinTarget : MonoBehaviour
 
             if (!found)
             {
-                bounds = collider.bounds;
+                bounds = CreateColliderLocalBounds(collider);
                 found = true;
                 continue;
             }
 
-            bounds.Encapsulate(collider.bounds);
+            EncapsulateColliderLocalBounds(ref bounds, collider);
         }
 
         return found;
     }
 
+    private Bounds CreateColliderLocalBounds(Collider collider)
+    {
+        if (collider is BoxCollider boxCollider)
+        {
+            Bounds boxBounds = new Bounds(boxCollider.center, boxCollider.size);
+            return CreateLocalBounds(boxBounds, boxCollider.transform.localToWorldMatrix);
+        }
+
+        return CreateLocalBounds(collider.bounds);
+    }
+
+    private void EncapsulateColliderLocalBounds(ref Bounds targetBounds, Collider collider)
+    {
+        if (collider is BoxCollider boxCollider)
+        {
+            Bounds boxBounds = new Bounds(boxCollider.center, boxCollider.size);
+            EncapsulateLocalBounds(ref targetBounds, boxBounds, boxCollider.transform.localToWorldMatrix);
+            return;
+        }
+
+        EncapsulateLocalBounds(ref targetBounds, collider.bounds);
+    }
+
+    private Bounds CreateLocalBounds(Bounds sourceBounds, Matrix4x4 sourceLocalToWorld)
+    {
+        Bounds localBounds = new Bounds(
+            transform.InverseTransformPoint(sourceLocalToWorld.MultiplyPoint3x4(sourceBounds.center)),
+            Vector3.zero);
+        EncapsulateLocalBounds(ref localBounds, sourceBounds, sourceLocalToWorld);
+        return localBounds;
+    }
+
+    private Bounds CreateLocalBounds(Bounds worldBounds)
+    {
+        Bounds localBounds = new Bounds(transform.InverseTransformPoint(worldBounds.center), Vector3.zero);
+        EncapsulateLocalBounds(ref localBounds, worldBounds);
+        return localBounds;
+    }
+
+    private void EncapsulateLocalBounds(ref Bounds targetBounds, Bounds sourceBounds, Matrix4x4 sourceLocalToWorld)
+    {
+        Vector3 min = sourceBounds.min;
+        Vector3 max = sourceBounds.max;
+
+        for (int x = 0; x <= 1; x++)
+        {
+            for (int y = 0; y <= 1; y++)
+            {
+                for (int z = 0; z <= 1; z++)
+                {
+                    Vector3 sourcePoint = new Vector3(
+                        x == 0 ? min.x : max.x,
+                        y == 0 ? min.y : max.y,
+                        z == 0 ? min.z : max.z);
+                    Vector3 worldPoint = sourceLocalToWorld.MultiplyPoint3x4(sourcePoint);
+                    targetBounds.Encapsulate(transform.InverseTransformPoint(worldPoint));
+                }
+            }
+        }
+    }
+
+    private void EncapsulateLocalBounds(ref Bounds targetBounds, Bounds worldBounds)
+    {
+        Vector3 min = worldBounds.min;
+        Vector3 max = worldBounds.max;
+
+        for (int x = 0; x <= 1; x++)
+        {
+            for (int y = 0; y <= 1; y++)
+            {
+                for (int z = 0; z <= 1; z++)
+                {
+                    Vector3 worldPoint = new Vector3(
+                        x == 0 ? min.x : max.x,
+                        y == 0 ? min.y : max.y,
+                        z == 0 ? min.z : max.z);
+                    targetBounds.Encapsulate(transform.InverseTransformPoint(worldPoint));
+                }
+            }
+        }
+    }
+
+    private float GetLocalBoundsWorldMinY(Bounds localBounds)
+    {
+        Vector3 min = localBounds.min;
+        Vector3 max = localBounds.max;
+        float minY = float.MaxValue;
+
+        for (int x = 0; x <= 1; x++)
+        {
+            for (int y = 0; y <= 1; y++)
+            {
+                for (int z = 0; z <= 1; z++)
+                {
+                    Vector3 localPoint = new Vector3(
+                        x == 0 ? min.x : max.x,
+                        y == 0 ? min.y : max.y,
+                        z == 0 ? min.z : max.z);
+                    minY = Mathf.Min(minY, transform.TransformPoint(localPoint).y);
+                }
+            }
+        }
+
+        return minY;
+    }
+
     private bool ShouldIgnoreVolumeBounds(Component component)
     {
-        Transform waterVisualTransform = transform.Find("Water Visual");
-        if (waterVisualTransform != null && component.transform.IsChildOf(waterVisualTransform))
+        if (IsChildOfNamedTransform(component, "Water Visual Root")
+            || IsChildOfNamedTransform(component, "Water Fill Mesh")
+            || IsChildOfNamedTransform(component, "Water Visual"))
         {
             return true;
         }
 
         WaterBasinVisual parentVisual = component.GetComponentInParent<WaterBasinVisual>();
         return parentVisual != null && parentVisual.transform != transform;
+    }
+
+    private bool IsChildOfNamedTransform(Component component, string childName)
+    {
+        Transform child = transform.Find(childName);
+        return child != null && component.transform.IsChildOf(child);
     }
 
     private void SubscribeUmbrellaTarget()
@@ -735,11 +898,13 @@ public class WaterBasinTarget : MonoBehaviour
 
         GUI.Box(new Rect(x, y, labelSize.x, labelSize.y), "Water Basin Target");
         Vector3 volumeSize = VolumeWorldSize;
+        Vector3 volumeCenter = VolumeWorldCenter;
         GUI.Label(new Rect(x + 8.0f, y + 20.0f, labelSize.x - 16.0f, 18.0f), $"Vol: {currentVolume:F2} / {Capacity:F2}  Fill: {Fill01:P0}");
         GUI.Label(new Rect(x + 8.0f, y + 38.0f, labelSize.x - 16.0f, 18.0f), $"Depth: {WaterDepth:F2}  Local SurfaceY: {waterSurfaceWorldY:F2}");
         GUI.Label(new Rect(x + 8.0f, y + 56.0f, labelSize.x - 16.0f, 18.0f), $"Group SurfaceY: {groupWaterSurfaceWorldY:F2}  Spread: {groupSurfaceSpread:F4}");
         GUI.Label(new Rect(x + 8.0f, y + 74.0f, labelSize.x - 16.0f, 18.0f), $"Area: {SurfaceArea:F2}  MaxH: {MaxWaterHeight:F2}");
         GUI.Label(new Rect(x + 8.0f, y + 92.0f, labelSize.x - 16.0f, 18.0f), $"Size: {volumeSize.x:F2},{volumeSize.y:F2},{volumeSize.z:F2}  Links: {connectedTargets.Count}");
+        GUI.Label(new Rect(x + 8.0f, y + 110.0f, labelSize.x - 16.0f, 18.0f), $"Center: {volumeCenter.x:F2},{volumeCenter.y:F2},{volumeCenter.z:F2}");
 
         if (!showGroupDebug)
         {
@@ -748,7 +913,7 @@ public class WaterBasinTarget : MonoBehaviour
 
         RefreshConnectedGroupDebugState();
         float groupFill = groupCapacity <= Epsilon ? 0.0f : groupVolume / groupCapacity;
-        GUI.Label(new Rect(x + 8.0f, y + 110.0f, labelSize.x - 16.0f, 18.0f), $"Group: {groupTargetCount}  {groupVolume:F2}/{groupCapacity:F2}  {groupFill:P0}");
+        GUI.Label(new Rect(x + 8.0f, y + 128.0f, labelSize.x - 16.0f, 18.0f), $"Group: {groupTargetCount}  {groupVolume:F2}/{groupCapacity:F2}  {groupFill:P0}");
     }
 
     private void RefreshConnectedGroupDebugState()

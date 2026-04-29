@@ -9,7 +9,11 @@ public class WaterBasinVisual : MonoBehaviour
 
     [Header("References")]
     [SerializeField] private WaterBasinTarget basinTarget;
-    [SerializeField] private Transform waterVisual;
+    [SerializeField] private Transform visualRoot;
+
+    [FormerlySerializedAs("waterVisual")]
+    [SerializeField] private Transform fillMesh;
+
     [SerializeField] private Renderer waterRenderer;
 
     [Header("Shape")]
@@ -39,6 +43,8 @@ public class WaterBasinVisual : MonoBehaviour
     private MaterialPropertyBlock materialPropertyBlock;
     private Renderer[] waterRenderers;
 
+    public Transform VisualRoot => visualRoot;
+    public Transform FillMesh => fillMesh;
     public float VisibleDepth => visibleDepth;
     public float VisualSurfaceWorldY => visualSurfaceWorldY;
 
@@ -76,7 +82,7 @@ public class WaterBasinVisual : MonoBehaviour
         Refresh(smoothChanges && Application.isPlaying);
     }
 
-    [ContextMenu("Refresh Visual Now")]
+    [ContextMenu("물 시각화 즉시 갱신")]
     public void RefreshImmediate()
     {
         Refresh(false);
@@ -84,7 +90,13 @@ public class WaterBasinVisual : MonoBehaviour
 
     private void Refresh(bool smooth)
     {
-        if (basinTarget == null || waterVisual == null)
+        if (basinTarget == null || fillMesh == null)
+        {
+            return;
+        }
+
+        Transform root = GetActiveVisualRoot();
+        if (root == null)
         {
             return;
         }
@@ -92,9 +104,14 @@ public class WaterBasinVisual : MonoBehaviour
         float targetDepth = CalculateTargetDepth();
         bool hasVisibleWater = targetDepth > Epsilon;
 
-        if (!waterVisual.gameObject.activeSelf)
+        if (root != basinTarget.transform && !root.gameObject.activeSelf)
         {
-            waterVisual.gameObject.SetActive(true);
+            root.gameObject.SetActive(true);
+        }
+
+        if (!fillMesh.gameObject.activeSelf)
+        {
+            fillMesh.gameObject.SetActive(true);
         }
 
         SetRendererVisible(!hideWhenEmpty || hasVisibleWater);
@@ -141,48 +158,85 @@ public class WaterBasinVisual : MonoBehaviour
 
     private void ApplyVisualTransform(float depth)
     {
-        Vector2 size = GetFootprintSize();
-        Vector3 volumeCenter = basinTarget.VolumeWorldCenter;
-        Vector3 worldCenter = new Vector3(
-            volumeCenter.x,
-            basinTarget.BottomWorldY + depth * 0.5f,
-            volumeCenter.z);
-
-        waterVisual.position = worldCenter;
-        waterVisual.rotation = basinTarget.transform.rotation;
-        ApplyVisualWorldScale(new Vector3(size.x, depth, size.y));
-    }
-
-    private Vector2 GetFootprintSize()
-    {
-        if (!useTargetVolumeSize || basinTarget == null)
+        Transform root = GetActiveVisualRoot();
+        if (root == null || basinTarget == null || fillMesh == null)
         {
-            return footprintSize;
+            return;
         }
 
-        Vector3 volumeSize = basinTarget.VolumeWorldSize;
-        return new Vector2(volumeSize.x, volumeSize.z);
+        ApplyRootTransform(root);
+        ApplyFillTransform(root, depth);
     }
 
-    private void ApplyVisualWorldScale(Vector3 worldScale)
+    private void ApplyRootTransform(Transform root)
     {
-        Transform parent = waterVisual.parent;
+        if (root == basinTarget.transform)
+        {
+            return;
+        }
+
+        root.position = basinTarget.VolumeWorldCenter;
+        root.rotation = basinTarget.transform.rotation;
+        ApplyWorldScale(root, GetVisualWorldSize());
+    }
+
+    private void ApplyFillTransform(Transform root, float depth)
+    {
+        Vector3 visualWorldSize = GetVisualWorldSize();
+        float fillDepth = Mathf.Max(Epsilon, Mathf.Clamp(depth, 0.0f, visualWorldSize.y));
+        Vector3 visualCenter = basinTarget.VolumeWorldCenter;
+        Vector3 fillCenter = new Vector3(
+            visualCenter.x,
+            basinTarget.BottomWorldY + fillDepth * 0.5f,
+            visualCenter.z);
+
+        fillMesh.position = fillCenter;
+        fillMesh.rotation = root.rotation;
+        ApplyWorldScale(fillMesh, new Vector3(visualWorldSize.x, fillDepth, visualWorldSize.z));
+    }
+
+    private Vector3 GetVisualWorldSize()
+    {
+        if (useTargetVolumeSize || basinTarget == null)
+        {
+            return basinTarget != null ? basinTarget.VolumeWorldSize : Vector3.one;
+        }
+
+        return new Vector3(
+            Mathf.Max(0.01f, footprintSize.x),
+            Mathf.Max(Epsilon, basinTarget.MaxWaterHeight),
+            Mathf.Max(0.01f, footprintSize.y));
+    }
+
+    private Transform GetActiveVisualRoot()
+    {
+        if (visualRoot != null)
+        {
+            return visualRoot;
+        }
+
+        return basinTarget != null ? basinTarget.transform : null;
+    }
+
+    private static void ApplyWorldScale(Transform target, Vector3 worldScale)
+    {
+        Transform parent = target.parent;
         if (parent == null)
         {
-            waterVisual.localScale = worldScale;
+            target.localScale = worldScale;
             return;
         }
 
         Vector3 parentScale = parent.lossyScale;
-        waterVisual.localScale = new Vector3(
-            DivideByParentScale(worldScale.x, parentScale.x),
-            DivideByParentScale(worldScale.y, parentScale.y),
-            DivideByParentScale(worldScale.z, parentScale.z));
+        target.localScale = new Vector3(
+            DivideByScale(worldScale.x, parentScale.x),
+            DivideByScale(worldScale.y, parentScale.y),
+            DivideByScale(worldScale.z, parentScale.z));
     }
 
-    private static float DivideByParentScale(float value, float parentScale)
+    private static float DivideByScale(float value, float scale)
     {
-        float denominator = Mathf.Abs(parentScale);
+        float denominator = Mathf.Abs(scale);
         return denominator <= Epsilon ? value : value / denominator;
     }
 
@@ -229,23 +283,61 @@ public class WaterBasinVisual : MonoBehaviour
             basinTarget = GetComponentInParent<WaterBasinTarget>();
         }
 
-        if (waterVisual == null)
+        if (visualRoot == null)
         {
-            Transform existing = transform.Find("Water Visual");
-            if (existing != null)
+            visualRoot = FindChildOrSelf("Water Visual Root");
+        }
+
+        if (fillMesh == null)
+        {
+            fillMesh = FindFillMeshCandidate();
+        }
+
+        if (visualRoot == null && fillMesh != null && fillMesh.parent != null && fillMesh.parent != transform)
+        {
+            visualRoot = fillMesh.parent;
+        }
+
+        if (waterRenderer == null && fillMesh != null)
+        {
+            waterRenderer = fillMesh.GetComponentInChildren<Renderer>(true);
+        }
+
+        waterRenderers = fillMesh != null
+            ? fillMesh.GetComponentsInChildren<Renderer>(true)
+            : null;
+    }
+
+    private Transform FindFillMeshCandidate()
+    {
+        if (visualRoot != null)
+        {
+            Transform child = visualRoot.Find("Water Fill Mesh");
+            if (child != null)
             {
-                waterVisual = existing;
+                return child;
             }
         }
 
-        if (waterRenderer == null && waterVisual != null)
+        Transform directFill = transform.Find("Water Fill Mesh");
+        if (directFill != null)
         {
-            waterRenderer = waterVisual.GetComponentInChildren<Renderer>(true);
+            return directFill;
         }
 
-        waterRenderers = waterVisual != null
-            ? waterVisual.GetComponentsInChildren<Renderer>(true)
-            : null;
+        Transform oldVisual = transform.Find("Water Visual");
+        return oldVisual != null ? oldVisual : null;
+    }
+
+    private Transform FindChildOrSelf(string childName)
+    {
+        if (gameObject.name == childName)
+        {
+            return transform;
+        }
+
+        Transform child = transform.Find(childName);
+        return child != null ? child : null;
     }
 
     private void SetRendererVisible(bool visible)
