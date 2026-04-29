@@ -874,16 +874,6 @@ public class WaterBasinTarget : MonoBehaviour
             Gizmos.DrawWireCube(surfaceCenter, surfaceSize);
         }
 
-        for (int i = 0; i < connectedTargets.Count; i++)
-        {
-            WaterBasinTarget connected = connectedTargets[i];
-            if (connected == null)
-            {
-                continue;
-            }
-
-            Gizmos.DrawLine(transform.position, connected.transform.position);
-        }
     }
 
     private void OnGUI()

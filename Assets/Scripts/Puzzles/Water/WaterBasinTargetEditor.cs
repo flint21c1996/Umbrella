@@ -7,27 +7,6 @@ using UnityEngine;
 [CanEditMultipleObjects]
 public class WaterBasinTargetEditor : Editor
 {
-    private void OnSceneGUI()
-    {
-        WaterBasinTarget source = target as WaterBasinTarget;
-        if (source == null)
-        {
-            return;
-        }
-
-        WaterBasinTarget[] allTargets = UnityEngine.Object.FindObjectsByType<WaterBasinTarget>();
-
-        Handles.color = Color.yellow;
-        for (int candidateIndex = 0; candidateIndex < allTargets.Length; candidateIndex++)
-        {
-            WaterBasinTarget candidate = allTargets[candidateIndex];
-            if (candidate != null && AreTargetsAdjacent(source, candidate))
-            {
-                Handles.DrawLine(source.transform.position, candidate.transform.position);
-            }
-        }
-    }
-
     public override void OnInspectorGUI()
     {
         DrawDefaultInspector();
@@ -71,9 +50,124 @@ public class WaterBasinTargetEditor : Editor
         return result.ToArray();
     }
 
-    private static bool AreTargetsAdjacent(WaterBasinTarget first, WaterBasinTarget second)
+}
+
+[InitializeOnLoad]
+internal static class WaterBasinTargetSceneDebugDrawer
+{
+    private static readonly Color SavedConnectionColor = new Color(0.1f, 0.45f, 1.0f, 1.0f);
+    private static readonly Color AutoConnectionColor = Color.yellow;
+
+    static WaterBasinTargetSceneDebugDrawer()
     {
-        return WaterBasinTargetEditorConnectionTool.AreTargetsAdjacent(first, second);
+        SceneView.duringSceneGui += DrawWaterBasinConnections;
+    }
+
+    private static void DrawWaterBasinConnections(SceneView sceneView)
+    {
+        WaterBasinTarget[] sources = GetPreviewSources();
+        if (sources.Length == 0)
+        {
+            return;
+        }
+
+        if (GameDebugController.ShowWaterBasinAutoConnectionPreview)
+        {
+            DrawAutoConnectionPreview(sources);
+        }
+
+        if (GameDebugController.ShowWaterBasinSavedConnectionPreview)
+        {
+            DrawSavedConnections(sources);
+        }
+    }
+
+    private static void DrawAutoConnectionPreview(WaterBasinTarget[] sources)
+    {
+        WaterBasinTarget[] allTargets = UnityEngine.Object.FindObjectsByType<WaterBasinTarget>();
+
+        Handles.color = AutoConnectionColor;
+        for (int sourceIndex = 0; sourceIndex < sources.Length; sourceIndex++)
+        {
+            WaterBasinTarget source = sources[sourceIndex];
+            if (source == null)
+            {
+                continue;
+            }
+
+            for (int candidateIndex = 0; candidateIndex < allTargets.Length; candidateIndex++)
+            {
+                WaterBasinTarget candidate = allTargets[candidateIndex];
+                if (candidate != null && WaterBasinTargetEditorConnectionTool.AreTargetsAdjacent(source, candidate))
+                {
+                    Handles.DrawLine(source.transform.position, candidate.transform.position);
+                }
+            }
+        }
+    }
+
+    private static void DrawSavedConnections(WaterBasinTarget[] sources)
+    {
+        Handles.color = SavedConnectionColor;
+        for (int sourceIndex = 0; sourceIndex < sources.Length; sourceIndex++)
+        {
+            WaterBasinTarget source = sources[sourceIndex];
+            if (source == null)
+            {
+                continue;
+            }
+
+            IReadOnlyList<WaterBasinTarget> connectedTargets = source.ConnectedTargets;
+            for (int connectedIndex = 0; connectedIndex < connectedTargets.Count; connectedIndex++)
+            {
+                WaterBasinTarget connected = connectedTargets[connectedIndex];
+                if (connected == null)
+                {
+                    continue;
+                }
+
+                Handles.DrawLine(source.transform.position, connected.transform.position);
+            }
+        }
+    }
+
+    private static WaterBasinTarget[] GetPreviewSources()
+    {
+        switch (GameDebugController.WaterBasinPreviewScope)
+        {
+            case GameDebugController.WaterBasinConnectionPreviewScope.SpecificTarget:
+                return GameDebugController.WaterBasinPreviewTarget != null
+                    ? new[] { GameDebugController.WaterBasinPreviewTarget }
+                    : new WaterBasinTarget[0];
+            case GameDebugController.WaterBasinConnectionPreviewScope.AllTargets:
+                return UnityEngine.Object.FindObjectsByType<WaterBasinTarget>();
+            default:
+                return GetSelectedTargets();
+        }
+    }
+
+    private static WaterBasinTarget[] GetSelectedTargets()
+    {
+        HashSet<WaterBasinTarget> result = new HashSet<WaterBasinTarget>();
+        GameObject[] gameObjects = Selection.gameObjects;
+
+        for (int i = 0; i < gameObjects.Length; i++)
+        {
+            WaterBasinTarget[] basinTargets = gameObjects[i].GetComponentsInChildren<WaterBasinTarget>(true);
+            for (int targetIndex = 0; targetIndex < basinTargets.Length; targetIndex++)
+            {
+                result.Add(basinTargets[targetIndex]);
+            }
+        }
+
+        return ToArray(result);
+    }
+
+    private static WaterBasinTarget[] ToArray(HashSet<WaterBasinTarget> targets)
+    {
+        WaterBasinTarget[] result = new WaterBasinTarget[targets.Count];
+        targets.CopyTo(result);
+        return result;
     }
 }
 
