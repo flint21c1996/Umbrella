@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -25,30 +25,47 @@ public class WaterBasinTarget : MonoBehaviour
     [SerializeField] private bool useUmbrellaTargetAsInput = true;
 
     [Header("Connections")]
-    [Tooltip("연결된 물 타겟목록")]
+    [Tooltip("연결된 물")]
     [SerializeField] private List<WaterBasinTarget> connectedTargets = new List<WaterBasinTarget>();
 
     [Header("Volume")]
     [Tooltip("바닥 면적")]
-    [SerializeField] private float surfaceArea = 1.0f;  //
+    [SerializeField] private float surfaceArea = 1.0f;
 
-    [Tooltip("Maximum visible/storable water height for this target.")]
-    [SerializeField] private float maxWaterHeight = 1.0f;   //최대 높이
+    [Tooltip("최대 물 높이")]
+    [SerializeField] private float maxWaterHeight = 1.0f;
 
-    [SerializeField] private float initialVolume;   //초기 부피
+    [Tooltip("기본 물의 양")]
+    [SerializeField] private float initialVolume;
 
     [Header("Height")]
+    [Tooltip("물이 차기 시작하는 높이")]
     [SerializeField] private BottomHeightMode bottomHeightMode = BottomHeightMode.ColliderBoundsMinY;
-    [SerializeField] private float manualBottomWorldY;  //useTransformYAsBottom이 false일 때 바닥으로 사용할 월드 Y 좌표.
+    [Tooltip("useTransformYAsBottom이 false일때 사용할 바닥의 월드Y좌표")]
+    [SerializeField] private float manualBottomWorldY;
 
     [Header("Runtime")]
-    [SerializeField] private float currentVolume;   //현재부피
-    [SerializeField] private float waterSurfaceWorldY;  //현재수면높이(월드Y)
-    [SerializeField] private float groupWaterSurfaceWorldY; //연결된 그룹의 수면높이(월드Y)
-    [SerializeField] private float groupSurfaceSpread;  //연결된 그룹의 수면높이 분포. 0이면 모두 같은 높이, 값이 커질수록 높이 차이가 커짐.
-    [SerializeField] private float groupVolume; //연결된 그룹의 총 부피
-    [SerializeField] private float groupCapacity;   //연결된 그룹의 총 용량
-    [SerializeField] private int groupTargetCount;  //연결된 그룹의 타겟 수.
+
+    [Tooltip("현재 블록의 물 부피")]
+    [SerializeField] private float currentVolume;
+
+    [Tooltip("현재 물 수면의 높이(월드기준)")]
+    [SerializeField] private float waterSurfaceWorldY;
+
+    [Tooltip("연결된 물의 높이(월드기준)")]
+    [SerializeField] private float groupWaterSurfaceWorldY;
+
+    [Tooltip("연결된 물의 수면 높이 차이")]
+    [SerializeField] private float groupSurfaceSpread;
+
+    [Tooltip("연결된 물의 최대 양")]
+    [SerializeField] private float groupVolume;
+
+    [Tooltip("연결된 물의 최대 양")]
+    [SerializeField] private float groupCapacity;
+
+    [Tooltip("연결된 물의 개수")]
+    [SerializeField] private int groupTargetCount;
 
     [Header("Debug")]
     [SerializeField] private bool drawGizmos = true;
@@ -156,6 +173,36 @@ public class WaterBasinTarget : MonoBehaviour
         }
 
         SolveConnectedGroup(-amount);
+    }
+
+    public void AddWaterToThisTarget(float amount)
+    {
+        if (amount <= Epsilon)
+        {
+            return;
+        }
+
+        SetThisTargetVolume(currentVolume + amount);
+    }
+
+    public void RemoveWaterFromThisTarget(float amount)
+    {
+        if (amount <= Epsilon)
+        {
+            return;
+        }
+
+        SetThisTargetVolume(currentVolume - amount);
+    }
+
+    public void FillThisTarget()
+    {
+        SetThisTargetVolume(Capacity);
+    }
+
+    public void RemoveAllWaterFromThisTarget()
+    {
+        SetThisTargetVolume(0.0f);
     }
 
     public void RemoveAllWater()
@@ -353,6 +400,24 @@ public class WaterBasinTarget : MonoBehaviour
         waterSurfaceWorldY = nextSurfaceY;
 
         return changed;
+    }
+
+    private void SetThisTargetVolume(float volume)
+    {
+        float nextVolume = Mathf.Clamp(volume, 0.0f, Capacity);
+        float nextSurfaceY = GetSurfaceForLocalVolume(nextVolume);
+        bool changed = ApplySolvedState(nextVolume, nextSurfaceY);
+
+        groupWaterSurfaceWorldY = waterSurfaceWorldY;
+        groupSurfaceSpread = 0.0f;
+        groupVolume = currentVolume;
+        groupCapacity = Capacity;
+        groupTargetCount = 1;
+
+        if (changed)
+        {
+            WaterStateChanged?.Invoke();
+        }
     }
 
     private float GetSurfaceForLocalVolume(float volume)
@@ -579,7 +644,29 @@ public class WaterBasinTarget : MonoBehaviour
     private void RefreshConnectedGroupDebugState()
     {
         List<WaterBasinTarget> group = CollectConnectedGroup();
-        RefreshDebugStateForGroup(group, GetAverageSurfaceY(group));
+        if (group.Count == 0)
+        {
+            return;
+        }
+
+        float totalVolume = 0.0f;
+        float totalCapacity = 0.0f;
+        float minSurfaceY = group[0].waterSurfaceWorldY;
+        float maxSurfaceY = group[0].waterSurfaceWorldY;
+
+        for (int i = 0; i < group.Count; i++)
+        {
+            WaterBasinTarget target = group[i];
+            totalVolume += target.currentVolume;
+            totalCapacity += target.Capacity;
+            minSurfaceY = Mathf.Min(minSurfaceY, target.waterSurfaceWorldY);
+            maxSurfaceY = Mathf.Max(maxSurfaceY, target.waterSurfaceWorldY);
+        }
+
+        groupSurfaceSpread = maxSurfaceY - minSurfaceY;
+        groupVolume = totalVolume;
+        groupCapacity = totalCapacity;
+        groupTargetCount = group.Count;
     }
 
     private static void RefreshDebugStateForGroup(List<WaterBasinTarget> group, float sharedSurfaceY)
@@ -613,22 +700,6 @@ public class WaterBasinTarget : MonoBehaviour
             target.groupCapacity = totalCapacity;
             target.groupTargetCount = group.Count;
         }
-    }
-
-    private static float GetAverageSurfaceY(List<WaterBasinTarget> group)
-    {
-        if (group.Count == 0)
-        {
-            return 0.0f;
-        }
-
-        float sum = 0.0f;
-        for (int i = 0; i < group.Count; i++)
-        {
-            sum += group[i].waterSurfaceWorldY;
-        }
-
-        return sum / group.Count;
     }
 
     private static void NotifyWaterStateChangedForGroup(List<WaterBasinTarget> group)
