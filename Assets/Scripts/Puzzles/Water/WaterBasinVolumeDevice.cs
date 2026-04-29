@@ -134,19 +134,10 @@ public class WaterBasinVolumeDevice : MonoBehaviour
         }
     }
 
+    [ContextMenu("Add Once")]
     public void AddOnce()
     {
         ExecuteExternal(VolumeOperation.Add, amount);
-    }
-
-    public void ActivateAdd()
-    {
-        ExecuteExternal(VolumeOperation.Add, amount);
-    }
-
-    public void ActivateRemove()
-    {
-        ExecuteExternal(VolumeOperation.Remove, amount);
     }
 
     public void SetAddOperation()
@@ -163,12 +154,6 @@ public class WaterBasinVolumeDevice : MonoBehaviour
     public void RemoveOnce()
     {
         ExecuteExternal(VolumeOperation.Remove, amount);
-    }
-
-    [ContextMenu("Add Once")]
-    private void AddOnceFromContextMenu()
-    {
-        AddOnce();
     }
 
     public void AddCustom(float customAmount)

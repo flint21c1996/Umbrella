@@ -108,8 +108,6 @@ public class WaterBasinTarget : MonoBehaviour
 
     public UmbrellaWaterTarget UmbrellaTarget => umbrellaWaterTarget;
     public IReadOnlyList<WaterBasinTarget> ConnectedTargets => connectedTargets;
-    public Vector3 VolumeLocalSize => GetVolumeLocalSize();
-    public Vector3 VolumeLocalCenter => GetVolumeLocalCenter();
     public Vector3 VolumeWorldSize => GetVolumeWorldSize();
     public Vector3 VolumeWorldCenter => GetVolumeWorldCenter();
     public float SurfaceArea => GetSurfaceArea();
@@ -489,25 +487,6 @@ public class WaterBasinTarget : MonoBehaviour
         }
     }
 
-    private Vector3 GetVolumeLocalSize()
-    {
-        switch (volumeSizeMode)
-        {
-            case VolumeSizeMode.TransformScale:
-                return Vector3.one;
-            case VolumeSizeMode.RendererBounds:
-                return TryGetRendererLocalBounds(out Bounds rendererBounds)
-                    ? ClampVolumeSize(rendererBounds.size)
-                    : GetManualVolumeSize();
-            case VolumeSizeMode.ColliderBounds:
-                return TryGetColliderLocalBounds(out Bounds colliderBounds)
-                    ? ClampVolumeSize(colliderBounds.size)
-                    : GetManualVolumeSize();
-            default:
-                return ScaleWorldSizeToLocal(GetManualVolumeSize());
-        }
-    }
-
     private Vector3 GetVolumeWorldCenter()
     {
         return transform.TransformPoint(GetVolumeLocalCenter());
@@ -551,21 +530,6 @@ public class WaterBasinTarget : MonoBehaviour
             Mathf.Max(Epsilon, Mathf.Abs(localSize.x * scale.x)),
             Mathf.Max(Epsilon, Mathf.Abs(localSize.y * scale.y)),
             Mathf.Max(Epsilon, Mathf.Abs(localSize.z * scale.z)));
-    }
-
-    private Vector3 ScaleWorldSizeToLocal(Vector3 worldSize)
-    {
-        Vector3 scale = transform.lossyScale;
-        return new Vector3(
-            DivideByScale(worldSize.x, scale.x),
-            DivideByScale(worldSize.y, scale.y),
-            DivideByScale(worldSize.z, scale.z));
-    }
-
-    private static float DivideByScale(float value, float scale)
-    {
-        float denominator = Mathf.Abs(scale);
-        return denominator <= Epsilon ? value : Mathf.Max(Epsilon, value / denominator);
     }
 
     private float GetBottomWorldY()
@@ -692,76 +656,81 @@ public class WaterBasinTarget : MonoBehaviour
 
     private void EncapsulateLocalBounds(ref Bounds targetBounds, Bounds sourceBounds, Matrix4x4 sourceLocalToWorld)
     {
-        Vector3 min = sourceBounds.min;
-        Vector3 max = sourceBounds.max;
-
-        for (int x = 0; x <= 1; x++)
+        EncapsulateBoundsCorners(ref targetBounds, sourceBounds, sourcePoint =>
         {
-            for (int y = 0; y <= 1; y++)
-            {
-                for (int z = 0; z <= 1; z++)
-                {
-                    Vector3 sourcePoint = new Vector3(
-                        x == 0 ? min.x : max.x,
-                        y == 0 ? min.y : max.y,
-                        z == 0 ? min.z : max.z);
-                    Vector3 worldPoint = sourceLocalToWorld.MultiplyPoint3x4(sourcePoint);
-                    targetBounds.Encapsulate(transform.InverseTransformPoint(worldPoint));
-                }
-            }
-        }
+            Vector3 worldPoint = sourceLocalToWorld.MultiplyPoint3x4(sourcePoint);
+            return transform.InverseTransformPoint(worldPoint);
+        });
     }
 
     private void EncapsulateLocalBounds(ref Bounds targetBounds, Bounds worldBounds)
     {
-        Vector3 min = worldBounds.min;
-        Vector3 max = worldBounds.max;
-
-        for (int x = 0; x <= 1; x++)
+        EncapsulateBoundsCorners(ref targetBounds, worldBounds, worldPoint =>
         {
-            for (int y = 0; y <= 1; y++)
-            {
-                for (int z = 0; z <= 1; z++)
-                {
-                    Vector3 worldPoint = new Vector3(
-                        x == 0 ? min.x : max.x,
-                        y == 0 ? min.y : max.y,
-                        z == 0 ? min.z : max.z);
-                    targetBounds.Encapsulate(transform.InverseTransformPoint(worldPoint));
-                }
-            }
-        }
+            return transform.InverseTransformPoint(worldPoint);
+        });
     }
 
     private float GetLocalBoundsWorldMinY(Bounds localBounds)
     {
-        Vector3 min = localBounds.min;
-        Vector3 max = localBounds.max;
         float minY = float.MaxValue;
 
+        ForEachBoundsCorner(localBounds, localPoint =>
+        {
+            minY = Mathf.Min(minY, transform.TransformPoint(localPoint).y);
+        });
+
+        return minY;
+    }
+
+    private static void EncapsulateBoundsCorners(
+        ref Bounds targetBounds,
+        Bounds sourceBounds,
+        Func<Vector3, Vector3> convertPoint)
+    {
         for (int x = 0; x <= 1; x++)
         {
             for (int y = 0; y <= 1; y++)
             {
                 for (int z = 0; z <= 1; z++)
                 {
-                    Vector3 localPoint = new Vector3(
-                        x == 0 ? min.x : max.x,
-                        y == 0 ? min.y : max.y,
-                        z == 0 ? min.z : max.z);
-                    minY = Mathf.Min(minY, transform.TransformPoint(localPoint).y);
+                    targetBounds.Encapsulate(convertPoint(GetBoundsCorner(sourceBounds, x, y, z)));
                 }
             }
         }
+    }
 
-        return minY;
+    private static void ForEachBoundsCorner(Bounds bounds, Action<Vector3> action)
+    {
+        for (int x = 0; x <= 1; x++)
+        {
+            for (int y = 0; y <= 1; y++)
+            {
+                for (int z = 0; z <= 1; z++)
+                {
+                    action(GetBoundsCorner(bounds, x, y, z));
+                }
+            }
+        }
+    }
+
+    private static Vector3 GetBoundsCorner(Bounds bounds, int x, int y, int z)
+    {
+        Vector3 min = bounds.min;
+        Vector3 max = bounds.max;
+
+        return new Vector3(
+            x == 0 ? min.x : max.x,
+            y == 0 ? min.y : max.y,
+            z == 0 ? min.z : max.z);
     }
 
     private bool ShouldIgnoreVolumeBounds(Component component)
     {
-        if (IsChildOfNamedTransform(component, "Water Visual Root")
-            || IsChildOfNamedTransform(component, "Water Fill Mesh")
-            || IsChildOfNamedTransform(component, "Water Visual"))
+        if (IsChildOfNamedTransform(component, "WaterVisualRoot")
+            || IsChildOfNamedTransform(component, "Water Visual Root")
+            || IsChildOfNamedTransform(component, "WaterFillMesh")
+            || IsChildOfNamedTransform(component, "Water Fill Mesh"))
         {
             return true;
         }
