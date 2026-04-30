@@ -1788,6 +1788,8 @@ MonoBehaviour:
   controlScope: 0
   operation: 0
   amount: 1
+  targetWaterDepth: 1
+  targetSurfaceWorldY: 0
   continuous: 0
   amountPerSecond: 1
   oneShot: 0
