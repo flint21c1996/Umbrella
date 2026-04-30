@@ -13,6 +13,13 @@ public partial class MapToolWindow : EditorWindow
         Vertex
     }
 
+    private enum PlacementRotationAxis
+    {
+        X,
+        Y,
+        Z
+    }
+
     private GameObject selectedPrefab;
     private GameObject floorPrefab;
     private GameObject wallPrefab;
@@ -32,6 +39,7 @@ public partial class MapToolWindow : EditorWindow
     private Vector3 randomScaleAmount = Vector3.zero;
     private float heightOffset;
     private float currentRotationDegrees;
+    private PlacementRotationAxis rotationAxis = PlacementRotationAxis.Y;
     private bool placementEnabled = true;
     private bool showGrid = true;
     private bool snapToSurface = true;
@@ -39,6 +47,8 @@ public partial class MapToolWindow : EditorWindow
     private bool snapToNeighbor;
     private bool alignToSurfaceNormal;
     private bool autoAlignToNeighbor = true;
+    private bool fitBetweenNearbyFaces = true;
+    private bool showOverlapWarning = true;
     private bool showMeshColliderBounds;
     private bool showAdvancedPlacementOptions;
     private bool uniformPlacementScale = true;
@@ -51,6 +61,7 @@ public partial class MapToolWindow : EditorWindow
     private Vector2 scrollPosition;
     private Vector2 lastMousePosition;
     private bool lastPreviewOccupied;
+    private bool lastPreviewOverlapsPlacedObject;
     private bool isDragPlacing;
     private GameObject previewInstance;
     private Material previewMaterial;
@@ -75,6 +86,8 @@ public partial class MapToolWindow : EditorWindow
     private float heightEditBaseY;
     private bool lastUsedNeighborSnap;
     private string lastHitColliderName = "None";
+    private string lastOverlapColliderName = "None";
+    private Collider lastPreviewOverlapCollider;
     private bool hasHoveredFaceAnchor;
     private Collider hoveredFaceCollider;
     private readonly List<Vector3> hoveredFacePoints = new();
@@ -175,6 +188,10 @@ public partial class MapToolWindow : EditorWindow
         );
         gridSize = Mathf.Max(0.1f, EditorGUILayout.FloatField(new GUIContent("Grid Size", "배치 위치를 맞출 grid 한 칸의 크기입니다."), gridSize));
         heightStep = Mathf.Max(0.01f, EditorGUILayout.FloatField(new GUIContent("Height Nudge", "1 / 3 키를 누를 때마다 움직이는 높이값입니다."), heightStep));
+        rotationAxis = (PlacementRotationAxis)EditorGUILayout.EnumPopup(
+            new GUIContent("Rotation Axis", "Q/E/R 키와 Rotate 버튼이 회전시킬 축입니다."),
+            rotationAxis
+        );
 
         EditorGUI.BeginChangeCheck();
         float nextHeightOffset = EditorGUILayout.FloatField(new GUIContent("Height Offset", "현재 배치 높이 오프셋입니다. 1 / 3 키로도 조금씩 조절할 수 있습니다."), heightOffset);
@@ -212,6 +229,15 @@ public partial class MapToolWindow : EditorWindow
         {
             EditorGUILayout.LabelField("Prefab Base Scale", GetSelectedPrefabBaseScale().ToString("F2"));
         }
+
+        fitBetweenNearbyFaces = EditorGUILayout.Toggle(
+            new GUIContent("Fit Between Faces", "켜면 주변 면 사이에 들어갈 때 X/Z 크기를 자동으로 맞춥니다. 랜덤 스케일 여부와 상관없이 동작합니다."),
+            fitBetweenNearbyFaces
+        );
+        showOverlapWarning = EditorGUILayout.Toggle(
+            new GUIContent("Show Overlap Warning", "켜면 배치 미리보기가 기존 오브젝트와 겹칠 때 노란색 경고와 겹친 collider 이름을 보여줍니다. 배치를 막지는 않습니다."),
+            showOverlapWarning
+        );
 
         EditorGUILayout.LabelField(new GUIContent("Scale Random Range", "직접 배치할 때 체크된 축에 랜덤 배율을 적용합니다. 닿아 있는 face가 있으면 그 face는 고정하고 열린 방향으로 크기 변화가 반영됩니다."), EditorStyles.boldLabel);
         DrawRandomScaleAxisControl(
@@ -382,7 +408,7 @@ public partial class MapToolWindow : EditorWindow
         // 디버그용 상태값은 지금 배치 계산이 무엇을 기준으로 굴러가는지
         // 빠르게 확인할 수 있게 최소 정보만 노출한다.
         EditorGUILayout.LabelField("Height Offset", GetCurrentHeight().ToString("F2"));
-        EditorGUILayout.LabelField("Current Rotation", $"{currentRotationDegrees:F1}도");
+        EditorGUILayout.LabelField("Current Rotation", $"{rotationAxis} {currentRotationDegrees:F1}도");
         EditorGUILayout.LabelField("Scale Random", GetScaleRandomSummary());
         EditorGUILayout.LabelField("Preview Occupied", lastPreviewOccupied ? "사용 중" : "비어 있음");
         EditorGUILayout.LabelField("Current Hit Collider", lastHitColliderName);

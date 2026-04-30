@@ -55,6 +55,15 @@ public partial class MapToolWindow : EditorWindow
             );
         }
 
+        if (showOverlapWarning && lastPreviewOverlapCollider != null)
+        {
+            DrawColliderWire(lastPreviewOverlapCollider, new Color(1.0f, 0.25f, 0.2f, 1.0f));
+            Handles.Label(
+                lastPreviewOverlapCollider.bounds.center + Vector3.up * 0.25f,
+                $"Overlap Check: {lastPreviewOverlapCollider.name} [{lastPreviewOverlapCollider.GetType().Name}]"
+            );
+        }
+
         DrawHoveredFaceAnchor();
         DrawPlacementDebugLines();
     }

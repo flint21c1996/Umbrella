@@ -114,7 +114,7 @@ public partial class MapToolWindow : EditorWindow
         previewInstance.SetActive(visible);
     }
 
-    private void UpdatePreviewMaterial(bool occupied)
+    private void UpdatePreviewMaterial(bool occupied, bool overlapsPlacedObject = false)
     {
         // 점유 상태만 색으로 바꾸고, material 자체는 하나를 공유해서 preview 비용을 줄인다.
         EnsurePreviewMaterial();
@@ -127,7 +127,9 @@ public partial class MapToolWindow : EditorWindow
 
         Color previewColor = occupied
             ? new Color(1.0f, 0.3f, 0.3f, 0.35f)
-            : new Color(0.35f, 0.85f, 1.0f, 0.35f);
+            : overlapsPlacedObject
+                ? new Color(1.0f, 0.8f, 0.2f, 0.35f)
+                : new Color(0.35f, 0.85f, 1.0f, 0.35f);
 
         previewMaterial.SetColor("_BaseColor", previewColor);
 

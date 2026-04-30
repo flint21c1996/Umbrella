@@ -217,8 +217,9 @@ public partial class MapToolWindow : EditorWindow
 
     private bool IsCellOccupied(Vector3 targetPosition, Quaternion targetRotation, Vector3 targetLocalScale)
     {
-        // 중심점만 비교하면 사진처럼 서로 다른 grid 위치라도 실제 부피가 겹치는 경우를 놓친다.
-        // 그래서 먼저 같은 위치를 빠르게 거르고, 그 다음 preview bounds와 기존 배치물 bounds의 실제 겹침을 검사한다.
+        // 배치를 막는 조건은 "같은 snapped 위치를 다시 찍는 경우"로만 둔다.
+        // 실제 부피 겹침은 rough blockout이나 높이 차이 표현에 필요할 수 있으므로
+        // 아래 UpdatePreviewOverlapState에서 경고/디버그 용도로만 따로 표시한다.
         Transform parent = placementParent != null ? placementParent : GameObject.Find(RootObjectName)?.transform;
         if (parent == null)
         {
@@ -235,32 +236,107 @@ public partial class MapToolWindow : EditorWindow
             }
         }
 
-        if (!TryGetPreviewBoundsAt(targetPosition, targetRotation, targetLocalScale, out Bounds previewBounds))
+        return false;
+    }
+
+    private bool UpdatePreviewOverlapState(Vector3 targetPosition, Quaternion targetRotation, Vector3 targetLocalScale)
+    {
+        lastPreviewOverlapCollider = null;
+        lastOverlapColliderName = "None";
+
+        if (!showOverlapWarning)
+        {
+            lastPreviewOverlapsPlacedObject = false;
+            return false;
+        }
+
+        bool overlaps = TryFindPreviewOverlap(targetPosition, targetRotation, targetLocalScale, out Collider overlapCollider);
+        if (overlaps)
+        {
+            lastPreviewOverlapCollider = overlapCollider;
+            lastOverlapColliderName = overlapCollider != null ? overlapCollider.name : "Unknown";
+        }
+
+        lastPreviewOverlapsPlacedObject = overlaps;
+        return overlaps;
+    }
+
+    private bool TryFindPreviewOverlap(Vector3 targetPosition, Quaternion targetRotation, Vector3 targetLocalScale, out Collider overlapCollider)
+    {
+        overlapCollider = null;
+
+        // renderer.bounds / collider.bounds는 월드 축 AABB라서 회전된 블록에서 실제보다 크게 부풀 수 있다.
+        // 그래서 preview와 주변 collider의 실제 world point를 모아, 각 오브젝트 축에 투영해 겹침을 확인한다.
+        if (!TryCollectPreviewWorldPointsAt(targetPosition, targetRotation, targetLocalScale, out List<Vector3> previewPoints, out Vector3 previewCenter, out float previewRadius))
         {
             return false;
         }
 
-        float overlapTolerance = Mathf.Max(0.0025f, gridSize * 0.0025f);
-        foreach (Transform child in parent)
+        Collider[] nearbyColliders = Physics.OverlapSphere(
+            previewCenter,
+            previewRadius + gridSize * 0.25f,
+            Physics.DefaultRaycastLayers,
+            QueryTriggerInteraction.Ignore
+        );
+
+        float overlapTolerance = Mathf.Max(0.001f, gridSize * 0.001f);
+        List<Vector3> neighborPoints = new();
+
+        foreach (Collider collider in nearbyColliders)
         {
-            if (child == null ||
-                previewInstance != null && child.IsChildOf(previewInstance.transform))
+            if (collider == null ||
+                previewInstance != null && collider.transform.IsChildOf(previewInstance.transform))
             {
                 continue;
             }
 
-            if (!TryGetObjectBounds(child.gameObject, out Bounds existingBounds))
+            if (!TryCollectColliderWorldPoints(collider, neighborPoints))
             {
-                continue;
+                neighborPoints.Clear();
+                neighborPoints.AddRange(GetBoundsCorners(collider.bounds));
             }
 
-            if (HasMeaningfulBoundsOverlap(previewBounds, existingBounds, overlapTolerance))
+            if (HasProjectedPointCloudOverlap(previewPoints, neighborPoints, targetRotation, collider.transform.rotation, overlapTolerance))
             {
+                overlapCollider = collider;
                 return true;
             }
         }
 
         return false;
+    }
+
+    private bool HasProjectedPointCloudOverlap(List<Vector3> lhs, List<Vector3> rhs, Quaternion lhsRotation, Quaternion rhsRotation, float tolerance)
+    {
+        Vector3[] axes =
+        {
+            lhsRotation * Vector3.right,
+            lhsRotation * Vector3.up,
+            lhsRotation * Vector3.forward,
+            rhsRotation * Vector3.right,
+            rhsRotation * Vector3.up,
+            rhsRotation * Vector3.forward,
+        };
+
+        foreach (Vector3 rawAxis in axes)
+        {
+            if (rawAxis.sqrMagnitude <= 0.000001f)
+            {
+                continue;
+            }
+
+            Vector3 axis = rawAxis.normalized;
+            GetProjectionInterval(lhs, axis, out float lhsMin, out float lhsMax);
+            GetProjectionInterval(rhs, axis, out float rhsMin, out float rhsMax);
+
+            // 한 축이라도 분리되어 있으면 실제 부피는 겹치지 않는다.
+            if (Mathf.Min(lhsMax, rhsMax) - Mathf.Max(lhsMin, rhsMin) <= tolerance)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private struct PlacementAxisContact
@@ -273,8 +349,8 @@ public partial class MapToolWindow : EditorWindow
 
     private bool ApplyContactAnchoredScale(ref Vector3 targetPosition, Quaternion targetRotation, Vector3 anchorLocalScale, ref Vector3 targetLocalScale, bool allowNearbyHorizontalContacts)
     {
-        // 기준 크기로 배치했을 때 닿아 있던 face를 기억한 뒤,
-        // 랜덤 scale을 적용해도 그 face만큼은 계속 붙어 있게 위치를 보정한다.
+        // 기준 크기로 배치했을 때 닿아 있거나 가까이 있는 face를 기억한 뒤,
+        // scale을 바꿔도 해당 face가 계속 붙어 있게 위치와 크기를 보정한다.
         if (!TryGetPlacementContactConstraints(targetPosition, targetRotation, anchorLocalScale, allowNearbyHorizontalContacts, out PlacementAxisContact[] contacts))
         {
             return false;
@@ -522,31 +598,4 @@ public partial class MapToolWindow : EditorWindow
         return Mathf.Min(maxA, maxB) - Mathf.Max(minA, minB) > tolerance;
     }
 
-    private bool TryGetPreviewBoundsAt(Vector3 targetPosition, Quaternion targetRotation, Vector3 targetLocalScale, out Bounds previewBounds)
-    {
-        previewBounds = default;
-
-        EnsurePreviewInstance();
-        if (previewInstance == null)
-        {
-            return false;
-        }
-
-        previewInstance.transform.position = targetPosition;
-        previewInstance.transform.rotation = targetRotation;
-        previewInstance.transform.localScale = targetLocalScale;
-        return TryGetObjectBounds(previewInstance, out previewBounds);
-    }
-
-    private bool HasMeaningfulBoundsOverlap(Bounds lhs, Bounds rhs, float tolerance)
-    {
-        float overlapX = Mathf.Min(lhs.max.x, rhs.max.x) - Mathf.Max(lhs.min.x, rhs.min.x);
-        float overlapY = Mathf.Min(lhs.max.y, rhs.max.y) - Mathf.Max(lhs.min.y, rhs.min.y);
-        float overlapZ = Mathf.Min(lhs.max.z, rhs.max.z) - Mathf.Max(lhs.min.z, rhs.min.z);
-
-        // 면끼리 딱 닿는 상태는 허용하고, 실제로 부피가 겹칠 때만 점유 상태로 본다.
-        return overlapX > tolerance &&
-               overlapY > tolerance &&
-               overlapZ > tolerance;
-    }
 }

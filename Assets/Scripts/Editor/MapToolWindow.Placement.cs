@@ -30,7 +30,7 @@ public partial class MapToolWindow : EditorWindow
 
         Vector3 placementLocalScale = GetRandomizedPlacementLocalScale();
         float lockedPlacementY = snappedPosition.y;
-        ApplyContactAnchoredScale(ref snappedPosition, placementRotation, baseLocalScale, ref placementLocalScale, HasScaleRandomEnabled());
+        ApplyContactAnchoredScale(ref snappedPosition, placementRotation, baseLocalScale, ref placementLocalScale, fitBetweenNearbyFaces);
         KeepPlacementOnSurface(ref snappedPosition, surfacePosition, surfaceNormal, placementRotation, placementLocalScale, lockedPlacementY);
 
         if (isDragPlacement &&
@@ -263,14 +263,28 @@ public partial class MapToolWindow : EditorWindow
 
     private Quaternion GetPlacementRotation(Vector3 surfaceNormal)
     {
+        Vector3 rotationAxisVector = GetRotationAxisVector();
         if (!alignToSurfaceNormal)
         {
-            return Quaternion.Euler(0.0f, currentRotationDegrees, 0.0f);
+            return Quaternion.AngleAxis(currentRotationDegrees, rotationAxisVector);
         }
 
         Quaternion surfaceRotation = Quaternion.FromToRotation(Vector3.up, surfaceNormal);
-        Quaternion localSpin = Quaternion.AngleAxis(currentRotationDegrees, Vector3.up);
+        Quaternion localSpin = Quaternion.AngleAxis(currentRotationDegrees, rotationAxisVector);
         return surfaceRotation * localSpin;
+    }
+
+    private Vector3 GetRotationAxisVector()
+    {
+        switch (rotationAxis)
+        {
+            case PlacementRotationAxis.X:
+                return Vector3.right;
+            case PlacementRotationAxis.Z:
+                return Vector3.forward;
+            default:
+                return Vector3.up;
+        }
     }
 
     private Vector3 GetAlignedPreviewPosition(Vector3 surfacePosition, Quaternion placementRotation, Vector3 surfaceNormal)

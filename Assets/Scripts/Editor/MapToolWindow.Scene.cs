@@ -113,25 +113,29 @@ public partial class MapToolWindow : EditorWindow
 
     private void RotateLeft()
     {
-        currentRotationDegrees = Mathf.Repeat(currentRotationDegrees - 90.0f, 360.0f);
-        Repaint();
+        ChangeRotationDegrees(-90.0f);
     }
 
     private void RotateRight()
     {
-        currentRotationDegrees = Mathf.Repeat(currentRotationDegrees + 90.0f, 360.0f);
-        Repaint();
+        ChangeRotationDegrees(90.0f);
     }
 
     private void RotateFineLeft()
     {
-        currentRotationDegrees = Mathf.Repeat(currentRotationDegrees - 1.0f, 360.0f);
-        Repaint();
+        ChangeRotationDegrees(-1.0f);
     }
 
     private void RotateFineRight()
     {
-        currentRotationDegrees = Mathf.Repeat(currentRotationDegrees + 1.0f, 360.0f);
+        ChangeRotationDegrees(1.0f);
+    }
+
+    private void ChangeRotationDegrees(float deltaDegrees)
+    {
+        // 회전값은 UI에서 고른 Rotation Axis에 적용된다.
+        // Q/E는 1도씩, R/Rotate 버튼은 90도씩 같은 축의 값을 바꾼다.
+        currentRotationDegrees = Mathf.Repeat(currentRotationDegrees + deltaDegrees, 360.0f);
         Repaint();
     }
 
@@ -194,13 +198,14 @@ public partial class MapToolWindow : EditorWindow
 
         Vector3 previewLocalScale = GetPlacementLocalScale();
         float lockedPreviewY = snappedPosition.y;
-        ApplyContactAnchoredScale(ref snappedPosition, placementRotation, previewLocalScale, ref previewLocalScale, HasScaleRandomEnabled());
+        ApplyContactAnchoredScale(ref snappedPosition, placementRotation, previewLocalScale, ref previewLocalScale, fitBetweenNearbyFaces);
         snappedPosition.y = lockedPreviewY;
 
         lastPreviewOccupied = IsCellOccupied(snappedPosition, placementRotation, previewLocalScale);
+        UpdatePreviewOverlapState(snappedPosition, placementRotation, previewLocalScale);
 
         UpdatePreviewTransform(snappedPosition, placementRotation, previewLocalScale);
-        UpdatePreviewMaterial(lastPreviewOccupied);
+        UpdatePreviewMaterial(lastPreviewOccupied, lastPreviewOverlapsPlacedObject);
         lastPreviewPosition = snappedPosition;
         lastPreviewRotation = placementRotation;
         hasLastPreviewTransform = true;
@@ -223,21 +228,27 @@ public partial class MapToolWindow : EditorWindow
 
         Handles.color = lastPreviewOccupied
             ? new Color(1.0f, 0.35f, 0.35f, 0.9f)
-            : new Color(0.2f, 0.9f, 1.0f, 0.9f);
+            : lastPreviewOverlapsPlacedObject
+                ? new Color(1.0f, 0.8f, 0.2f, 0.9f)
+                : new Color(0.2f, 0.9f, 1.0f, 0.9f);
         Handles.Label(
             snappedPosition + Vector3.up * 0.25f,
             lastPreviewOccupied
-                ? $"{selectedPrefab.name} (Occupied)\nHit: {lastHitColliderName}"
-                : $"{selectedPrefab.name}\nHit: {lastHitColliderName}"
+                ? $"{selectedPrefab.name} (Same Cell)\nHit: {lastHitColliderName}"
+                : lastPreviewOverlapsPlacedObject
+                    ? $"{selectedPrefab.name} (Overlap Warning)\nHit: {lastHitColliderName}\nOverlap: {lastOverlapColliderName}"
+                    : $"{selectedPrefab.name}\nHit: {lastHitColliderName}"
         );
     }
 
     private void DrawLockedScaleEditPreview()
     {
-        lastPreviewOccupied = IsCellOccupied(scaleEditPosition, scaleEditRotation, GetPlacementLocalScale());
+        Vector3 previewLocalScale = GetPlacementLocalScale();
+        lastPreviewOccupied = IsCellOccupied(scaleEditPosition, scaleEditRotation, previewLocalScale);
+        UpdatePreviewOverlapState(scaleEditPosition, scaleEditRotation, previewLocalScale);
 
-        UpdatePreviewTransform(scaleEditPosition, scaleEditRotation);
-        UpdatePreviewMaterial(lastPreviewOccupied);
+        UpdatePreviewTransform(scaleEditPosition, scaleEditRotation, previewLocalScale);
+        UpdatePreviewMaterial(lastPreviewOccupied, lastPreviewOverlapsPlacedObject);
         lastPreviewPosition = scaleEditPosition;
         lastPreviewRotation = scaleEditRotation;
         hasLastPreviewTransform = true;
@@ -276,10 +287,12 @@ public partial class MapToolWindow : EditorWindow
 
     private void DrawLockedHeightEditPreview()
     {
-        lastPreviewOccupied = IsCellOccupied(heightEditPosition, heightEditRotation, GetPlacementLocalScale());
+        Vector3 previewLocalScale = GetPlacementLocalScale();
+        lastPreviewOccupied = IsCellOccupied(heightEditPosition, heightEditRotation, previewLocalScale);
+        UpdatePreviewOverlapState(heightEditPosition, heightEditRotation, previewLocalScale);
 
-        UpdatePreviewTransform(heightEditPosition, heightEditRotation);
-        UpdatePreviewMaterial(lastPreviewOccupied);
+        UpdatePreviewTransform(heightEditPosition, heightEditRotation, previewLocalScale);
+        UpdatePreviewMaterial(lastPreviewOccupied, lastPreviewOverlapsPlacedObject);
         lastPreviewPosition = heightEditPosition;
         lastPreviewRotation = heightEditRotation;
         hasLastPreviewTransform = true;
