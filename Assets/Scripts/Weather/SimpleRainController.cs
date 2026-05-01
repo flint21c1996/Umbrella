@@ -58,6 +58,17 @@ namespace UmbrellaPuzzle.Weather
         [SerializeField, Tooltip("빗방울의 수평 이동 속도입니다. X는 월드 X축, Y는 월드 Z축 방향으로 적용됩니다.")]
         private Vector2 wind = new Vector2(0.8f, 0f);
 
+        [Header("Collision")]
+
+        [SerializeField, Tooltip("켜면 비 파티클이 Collision Mask에 포함된 3D Collider에 닿을 때 사라집니다. 우산 RainBlocker와 함께 사용합니다.")]
+        private bool enableWorldCollision = true;
+
+        [SerializeField, Tooltip("비 파티클을 막을 Collider 레이어입니다. 기본값은 RainBlocker 레이어입니다.")]
+        private LayerMask collisionMask = 1 << 11;
+
+        [SerializeField, Tooltip("파티클 충돌 반경 배율입니다. 빗줄기가 우산을 살짝 통과해 보이면 값을 키워보세요.")]
+        private float collisionRadiusScale = 0.35f;
+
         [Header("Look")]
 
         // 여러 Rain Zone이 같은 머티리얼을 공유하게 하고 싶을 때 지정한다.
@@ -195,6 +206,7 @@ namespace UmbrellaPuzzle.Weather
             fallSpeed = Mathf.Max(0.1f, fallSpeed);
             dropWidth = Mathf.Max(0.001f, dropWidth);
             streakLength = Mathf.Max(0.01f, streakLength);
+            collisionRadiusScale = Mathf.Max(0.01f, collisionRadiusScale);
 
             if (!Application.isPlaying)
             {
@@ -358,7 +370,15 @@ namespace UmbrellaPuzzle.Weather
             noise.scrollSpeed = 0.45f;
 
             ParticleSystem.CollisionModule collision = rainParticles.collision;
-            collision.enabled = false;
+            collision.enabled = enableWorldCollision;
+            collision.type = ParticleSystemCollisionType.World;
+            collision.mode = ParticleSystemCollisionMode.Collision3D;
+            collision.collidesWith = collisionMask;
+            collision.dampen = 1f;
+            collision.bounce = 0f;
+            collision.lifetimeLoss = 1f;
+            collision.radiusScale = collisionRadiusScale;
+            collision.enableDynamicColliders = true;
 
             rainRenderer.renderMode = ParticleSystemRenderMode.Stretch;
             rainRenderer.cameraVelocityScale = 0f;
