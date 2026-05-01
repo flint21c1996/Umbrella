@@ -49,11 +49,23 @@ namespace UmbrellaPuzzle.Weather
         private float particleSize = 0.08f;
 
         private const string SplashObjectName = "Ground Splash Particles";
+        private const string SegmentObjectPrefix = "Ground Splash Segment ";
+        private const int SegmentCount = 4;
+        private const float MinSegmentSize = 0.05f;
 
         private static Material sharedRuntimeMaterial;
 
         private ParticleSystem splashParticles;
         private ParticleSystemRenderer splashRenderer;
+        private ParticleSystem[] segmentParticles;
+        private ParticleSystemRenderer[] segmentRenderers;
+        private bool hasWorldExclusionArea;
+        private Vector3 worldExclusionCenter;
+        private Vector2 worldExclusionSize;
+        private bool pendingSettingsApply;
+        private readonly Vector3[] segmentLocalPositions = new Vector3[SegmentCount];
+        private readonly Vector2[] segmentSizes = new Vector2[SegmentCount];
+        private readonly float[] segmentEmissionWeights = new float[SegmentCount];
 
         public float Intensity
         {
@@ -80,9 +92,39 @@ namespace UmbrellaPuzzle.Weather
         {
             localEmitterOffset = offset;
 
+            if (hasWorldExclusionArea)
+            {
+                ApplySettings();
+                return;
+            }
+
             if (splashParticles != null)
             {
                 splashParticles.transform.localPosition = localEmitterOffset;
+            }
+        }
+
+        public void SetWorldExclusionArea(Vector3 worldCenter, Vector2 worldSize)
+        {
+            hasWorldExclusionArea = worldSize.x > 0.01f && worldSize.y > 0.01f;
+            worldExclusionCenter = worldCenter;
+            worldExclusionSize = new Vector2(Mathf.Max(0f, worldSize.x), Mathf.Max(0f, worldSize.y));
+            ApplySettings();
+        }
+
+        public void ClearWorldExclusionArea()
+        {
+            if (!hasWorldExclusionArea)
+            {
+                return;
+            }
+
+            hasWorldExclusionArea = false;
+            ApplySettings();
+
+            if (Application.isPlaying && intensity > 0.001f && splashParticles != null && !splashParticles.isPlaying)
+            {
+                splashParticles.Play();
             }
         }
 
@@ -126,6 +168,18 @@ namespace UmbrellaPuzzle.Weather
                 return;
             }
 
+            pendingSettingsApply = true;
+            ApplyIntensity();
+        }
+
+        private void Update()
+        {
+            if (!pendingSettingsApply)
+            {
+                return;
+            }
+
+            pendingSettingsApply = false;
             ApplySettings();
         }
 
@@ -133,6 +187,14 @@ namespace UmbrellaPuzzle.Weather
         {
             EnsureParticleSystem();
             ApplySettings();
+
+            if (hasWorldExclusionArea)
+            {
+                PlaySegmentParticles();
+                return;
+            }
+
+            StopSegmentParticles(true);
 
             if (!splashParticles.isPlaying)
             {
@@ -157,6 +219,7 @@ namespace UmbrellaPuzzle.Weather
                 : ParticleSystemStopBehavior.StopEmitting;
 
             splashParticles.Stop(true, stopBehavior);
+            StopSegmentParticles(clearParticles);
         }
 
         private void EnsureParticleSystem()
@@ -202,13 +265,221 @@ namespace UmbrellaPuzzle.Weather
                 return;
             }
 
-            splashParticles.transform.localPosition = localEmitterOffset;
-            splashParticles.transform.localRotation = Quaternion.identity;
+            if (hasWorldExclusionArea)
+            {
+                int segmentCount = BuildVisibleSegments();
+                ConfigureParticleSystem(splashParticles, splashRenderer, localEmitterOffset, areaSize, 0f);
+                splashParticles.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
-            ParticleSystem.MainModule main = splashParticles.main;
+                EnsureSegmentSystems();
+                for (int i = 0; i < SegmentCount; i++)
+                {
+                    if (i >= segmentCount)
+                    {
+                        StopSegmentParticle(i, true);
+                        continue;
+                    }
+
+                    ConfigureParticleSystem(
+                        segmentParticles[i],
+                        segmentRenderers[i],
+                        segmentLocalPositions[i],
+                        segmentSizes[i],
+                        segmentEmissionWeights[i]
+                    );
+
+                    if (intensity > 0.001f && !segmentParticles[i].isPlaying)
+                    {
+                        segmentParticles[i].Play();
+                    }
+                }
+
+                return;
+            }
+
+            StopSegmentParticles(true);
+            ConfigureParticleSystem(splashParticles, splashRenderer, localEmitterOffset, areaSize, 1f);
+        }
+
+        private int BuildVisibleSegments()
+        {
+            Vector3 areaCenter = transform.TransformPoint(localEmitterOffset);
+            float areaMinX = areaCenter.x - areaSize.x * 0.5f;
+            float areaMaxX = areaCenter.x + areaSize.x * 0.5f;
+            float areaMinZ = areaCenter.z - areaSize.y * 0.5f;
+            float areaMaxZ = areaCenter.z + areaSize.y * 0.5f;
+
+            float exclusionMinX = worldExclusionCenter.x - worldExclusionSize.x * 0.5f;
+            float exclusionMaxX = worldExclusionCenter.x + worldExclusionSize.x * 0.5f;
+            float exclusionMinZ = worldExclusionCenter.z - worldExclusionSize.y * 0.5f;
+            float exclusionMaxZ = worldExclusionCenter.z + worldExclusionSize.y * 0.5f;
+
+            float overlapMinX = Mathf.Max(areaMinX, exclusionMinX);
+            float overlapMaxX = Mathf.Min(areaMaxX, exclusionMaxX);
+            float overlapMinZ = Mathf.Max(areaMinZ, exclusionMinZ);
+            float overlapMaxZ = Mathf.Min(areaMaxZ, exclusionMaxZ);
+
+            if (overlapMinX >= overlapMaxX || overlapMinZ >= overlapMaxZ)
+            {
+                segmentLocalPositions[0] = localEmitterOffset;
+                segmentSizes[0] = areaSize;
+                segmentEmissionWeights[0] = 1f;
+                return 1;
+            }
+
+            float totalArea = Mathf.Max(0.01f, areaSize.x * areaSize.y);
+            int segmentIndex = 0;
+
+            TryAddSegment(areaMinX, overlapMinX, areaMinZ, areaMaxZ, areaCenter.y, totalArea, ref segmentIndex);
+            TryAddSegment(overlapMaxX, areaMaxX, areaMinZ, areaMaxZ, areaCenter.y, totalArea, ref segmentIndex);
+            TryAddSegment(overlapMinX, overlapMaxX, areaMinZ, overlapMinZ, areaCenter.y, totalArea, ref segmentIndex);
+            TryAddSegment(overlapMinX, overlapMaxX, overlapMaxZ, areaMaxZ, areaCenter.y, totalArea, ref segmentIndex);
+
+            return segmentIndex;
+        }
+
+        private void TryAddSegment(
+            float minX,
+            float maxX,
+            float minZ,
+            float maxZ,
+            float worldY,
+            float totalArea,
+            ref int segmentIndex
+        )
+        {
+            if (segmentIndex >= SegmentCount)
+            {
+                return;
+            }
+
+            float width = maxX - minX;
+            float depth = maxZ - minZ;
+
+            if (width < MinSegmentSize || depth < MinSegmentSize)
+            {
+                return;
+            }
+
+            Vector3 worldCenter = new Vector3((minX + maxX) * 0.5f, worldY, (minZ + maxZ) * 0.5f);
+            segmentLocalPositions[segmentIndex] = transform.InverseTransformPoint(worldCenter);
+            segmentSizes[segmentIndex] = new Vector2(width, depth);
+            segmentEmissionWeights[segmentIndex] = Mathf.Clamp01(width * depth / totalArea);
+            segmentIndex++;
+        }
+
+        private void EnsureSegmentSystems()
+        {
+            if (segmentParticles == null || segmentParticles.Length != SegmentCount)
+            {
+                segmentParticles = new ParticleSystem[SegmentCount];
+                segmentRenderers = new ParticleSystemRenderer[SegmentCount];
+            }
+
+            for (int i = 0; i < SegmentCount; i++)
+            {
+                if (segmentParticles[i] != null && segmentRenderers[i] != null)
+                {
+                    continue;
+                }
+
+                string segmentName = SegmentObjectPrefix + (i + 1);
+                Transform child = transform.Find(segmentName);
+                GameObject segmentObject;
+
+                if (child == null)
+                {
+                    segmentObject = new GameObject(segmentName);
+                    segmentObject.transform.SetParent(transform, false);
+                }
+                else
+                {
+                    segmentObject = child.gameObject;
+                }
+
+                segmentParticles[i] = segmentObject.GetComponent<ParticleSystem>();
+                if (segmentParticles[i] == null)
+                {
+                    segmentParticles[i] = segmentObject.AddComponent<ParticleSystem>();
+                }
+
+                segmentRenderers[i] = segmentObject.GetComponent<ParticleSystemRenderer>();
+                if (segmentRenderers[i] == null)
+                {
+                    segmentRenderers[i] = segmentObject.AddComponent<ParticleSystemRenderer>();
+                }
+            }
+        }
+
+        private void PlaySegmentParticles()
+        {
+            if (segmentParticles == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < SegmentCount; i++)
+            {
+                if (segmentParticles[i] == null || segmentEmissionWeights[i] <= 0f)
+                {
+                    continue;
+                }
+
+                if (!segmentParticles[i].isPlaying)
+                {
+                    segmentParticles[i].Play();
+                }
+            }
+        }
+
+        private void StopSegmentParticles(bool clearParticles)
+        {
+            if (segmentParticles == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < SegmentCount; i++)
+            {
+                StopSegmentParticle(i, clearParticles);
+            }
+        }
+
+        private void StopSegmentParticle(int index, bool clearParticles)
+        {
+            if (segmentParticles == null || index < 0 || index >= segmentParticles.Length || segmentParticles[index] == null)
+            {
+                return;
+            }
+
+            ParticleSystemStopBehavior stopBehavior = clearParticles
+                ? ParticleSystemStopBehavior.StopEmittingAndClear
+                : ParticleSystemStopBehavior.StopEmitting;
+
+            segmentParticles[index].Stop(true, stopBehavior);
+            segmentEmissionWeights[index] = 0f;
+        }
+
+        private void ConfigureParticleSystem(
+            ParticleSystem particles,
+            ParticleSystemRenderer particleRenderer,
+            Vector3 localPosition,
+            Vector2 shapeSize,
+            float emissionWeight
+        )
+        {
+            if (particles == null || particleRenderer == null)
+            {
+                return;
+            }
+
+            particles.transform.localPosition = localPosition;
+            particles.transform.localRotation = Quaternion.identity;
+
+            ParticleSystem.MainModule main = particles.main;
             main.loop = true;
 
-            if (splashParticles.isStopped)
+            if (particles.isStopped)
             {
                 main.duration = 4f;
             }
@@ -221,25 +492,25 @@ namespace UmbrellaPuzzle.Weather
             main.startColor = splashColor;
             main.playOnAwake = false;
 
-            ParticleSystem.EmissionModule emission = splashParticles.emission;
+            ParticleSystem.EmissionModule emission = particles.emission;
             emission.enabled = true;
-            emission.rateOverTime = maxEmissionRate * intensity;
+            emission.rateOverTime = maxEmissionRate * intensity * Mathf.Clamp01(emissionWeight);
 
-            ParticleSystem.ShapeModule shape = splashParticles.shape;
+            ParticleSystem.ShapeModule shape = particles.shape;
             shape.enabled = true;
             shape.shapeType = ParticleSystemShapeType.Box;
-            shape.scale = new Vector3(areaSize.x, 0.05f, areaSize.y);
+            shape.scale = new Vector3(shapeSize.x, 0.05f, shapeSize.y);
             shape.position = Vector3.zero;
             shape.rotation = Vector3.zero;
 
-            ParticleSystem.VelocityOverLifetimeModule velocity = splashParticles.velocityOverLifetime;
+            ParticleSystem.VelocityOverLifetimeModule velocity = particles.velocityOverLifetime;
             velocity.enabled = true;
             velocity.space = ParticleSystemSimulationSpace.World;
             velocity.x = new ParticleSystem.MinMaxCurve(-horizontalSpread, horizontalSpread);
             velocity.y = new ParticleSystem.MinMaxCurve(upwardSpeedRange.x, upwardSpeedRange.y);
             velocity.z = new ParticleSystem.MinMaxCurve(-horizontalSpread, horizontalSpread);
 
-            ParticleSystem.ColorOverLifetimeModule color = splashParticles.colorOverLifetime;
+            ParticleSystem.ColorOverLifetimeModule color = particles.colorOverLifetime;
             color.enabled = true;
 
             Gradient gradient = new Gradient();
@@ -257,16 +528,42 @@ namespace UmbrellaPuzzle.Weather
                 });
             color.color = gradient;
 
-            splashRenderer.renderMode = ParticleSystemRenderMode.Billboard;
-            splashRenderer.normalDirection = 0f;
-            splashRenderer.sortMode = ParticleSystemSortMode.None;
-            splashRenderer.sharedMaterial = GetOrCreateSplashMaterial();
+            particleRenderer.renderMode = ParticleSystemRenderMode.Billboard;
+            particleRenderer.normalDirection = 0f;
+            particleRenderer.sortMode = ParticleSystemSortMode.None;
+            particleRenderer.sharedMaterial = GetOrCreateSplashMaterial();
         }
 
         private void ApplyIntensity()
         {
             if (splashParticles == null)
             {
+                return;
+            }
+
+            if (hasWorldExclusionArea)
+            {
+                ParticleSystem.EmissionModule mainEmission = splashParticles.emission;
+                mainEmission.enabled = true;
+                mainEmission.rateOverTime = 0f;
+
+                if (segmentParticles == null)
+                {
+                    return;
+                }
+
+                for (int i = 0; i < SegmentCount; i++)
+                {
+                    if (segmentParticles[i] == null)
+                    {
+                        continue;
+                    }
+
+                    ParticleSystem.EmissionModule segmentEmission = segmentParticles[i].emission;
+                    segmentEmission.enabled = true;
+                    segmentEmission.rateOverTime = maxEmissionRate * intensity * segmentEmissionWeights[i];
+                }
+
                 return;
             }
 

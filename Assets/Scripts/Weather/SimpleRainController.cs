@@ -379,6 +379,7 @@ namespace UmbrellaPuzzle.Weather
             collision.lifetimeLoss = 1f;
             collision.radiusScale = collisionRadiusScale;
             collision.enableDynamicColliders = true;
+            collision.sendCollisionMessages = false;
 
             rainRenderer.renderMode = ParticleSystemRenderMode.Stretch;
             rainRenderer.cameraVelocityScale = 0f;

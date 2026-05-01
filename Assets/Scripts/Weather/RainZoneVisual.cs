@@ -1,3 +1,4 @@
+using UmbrellaPuzzle.Environmental;
 using UnityEngine;
 
 namespace UmbrellaPuzzle.Weather
@@ -7,9 +8,9 @@ namespace UmbrellaPuzzle.Weather
     // 이 컴포넌트는 "이 구역에 비가 내린다"는 시각 피드백만 제어한다.
     [DisallowMultipleComponent]
     [RequireComponent(typeof(SimpleRainController))]
-    public sealed class RainZoneVisual : MonoBehaviour
+    public sealed class RainZoneVisual : MonoBehaviour, IEnvironmentZoneVisual
     {
-        // Rain Zone이 퍼즐에서 어떤 상태로 보일지 나타낸다.
+        // 이전 코드 호환용 상태 enum이다. 새 환경 요소 코드는 EnvironmentZoneState를 사용한다.
         public enum RainZoneState
         {
             Inactive,
@@ -24,10 +25,24 @@ namespace UmbrellaPuzzle.Weather
         [SerializeField, Tooltip("실제 비 파티클을 생성하는 컨트롤러입니다. 비워두면 같은 GameObject에서 자동으로 찾습니다.")]
         private SimpleRainController rainController;
 
+        [SerializeField, Tooltip("바닥 물튐 파티클을 생성하는 컨트롤러입니다. 비워두고 Auto Create Ground Splash를 켜면 런타임에 자동 추가됩니다.")]
+        private SimpleRainSplashController groundSplashController;
+
         // Rain Zone의 판정 범위를 나타내는 Collider다.
         // 비워두면 같은 GameObject 또는 자식에서 Collider를 자동으로 찾는다.
         [SerializeField, Tooltip("비가 내려야 하는 퍼즐 구역의 Collider입니다. Sync Area From Collider가 켜져 있으면 이 크기로 비 영역을 맞춥니다.")]
         private Collider zoneCollider;
+
+        [Header("Optional Visuals")]
+
+        [SerializeField, Tooltip("비가 활성화될 때 켜지는 젖은 바닥 표시 오브젝트입니다. Decal, 얇은 Plane, Mesh 등을 연결할 수 있습니다.")]
+        private GameObject wetAreaVisual;
+
+        [SerializeField, Tooltip("Wet Area Visual을 Collider 바닥 중앙과 X/Z 크기에 맞춰 자동 배치합니다.")]
+        private bool syncWetAreaFromCollider = true;
+
+        [SerializeField, Tooltip("Wet Area Visual을 Collider 바닥면보다 살짝 위에 띄우는 높이입니다.")]
+        private float wetAreaHeightOffset = 0.02f;
 
         [Header("Geometry")]
 
@@ -45,11 +60,28 @@ namespace UmbrellaPuzzle.Weather
         [SerializeField, Tooltip("비 생성 위치를 Collider 윗면보다 얼마나 위에 둘지 정합니다.")]
         private float emitterTopPadding = 0.25f;
 
+        [SerializeField, Tooltip("바닥 물튐 생성 위치를 Collider 바닥면보다 얼마나 위에 둘지 정합니다.")]
+        private float groundSplashHeightOffset = 0.05f;
+
+        [Header("Splash")]
+
+        [SerializeField, Tooltip("켜면 Ground Splash Controller가 없을 때 Play Mode에서 자동으로 추가합니다.")]
+        private bool autoCreateGroundSplash = true;
+
+        [SerializeField, Range(0f, 2f), Tooltip("비 강도 대비 바닥 물튐 강도 배율입니다. 0이면 물튐을 사용하지 않습니다.")]
+        private float groundSplashIntensityMultiplier = 0.45f;
+
+        [SerializeField, Tooltip("우산이 막고 있는 바닥 물튐 제외 영역을 RainBlocker 크기보다 약간 넓히는 값입니다.")]
+        private float groundSplashBlockerPadding = 0.05f;
+
+        [SerializeField, Tooltip("RainBlocked 신호가 잠깐 끊겨도 바닥 물튐 제외 영역을 유지하는 시간입니다.")]
+        private float groundSplashBlockerGraceTime = 0.12f;
+
         [Header("State")]
 
         // Play Mode 시작 시 Rain Zone이 어떤 상태로 시작할지 정한다.
         [SerializeField, Tooltip("Play Mode 시작 시 이 Rain Zone이 가질 초기 시각 상태입니다.")]
-        private RainZoneState startState = RainZoneState.Active;
+        private EnvironmentZoneState startState = EnvironmentZoneState.Active;
 
         // Inactive 상태에서의 비 강도다.
         // 0이면 비가 보이지 않는 상태로 시작한다.
@@ -79,7 +111,7 @@ namespace UmbrellaPuzzle.Weather
 
         // 현재 Rain Zone 상태다. 디버깅을 위해 Inspector에 표시한다.
         [SerializeField, Tooltip("현재 Rain Zone의 런타임 상태입니다. Play Mode 중 변경하면 다음 Update에서 상태가 적용됩니다.")]
-        private RainZoneState currentState;
+        private EnvironmentZoneState currentState;
 
         // 현재 SimpleRainController에 적용 중인 비 강도다.
         [SerializeField, Tooltip("현재 SimpleRainController에 적용 중인 비 강도입니다.")]
@@ -94,6 +126,12 @@ namespace UmbrellaPuzzle.Weather
 
         // OnValidate에서 바로 Play/Stop을 호출하지 않고, 다음 Update에서 안전하게 적용하기 위한 플래그다.
         private bool pendingImmediateStateApply;
+        private Bounds groundSplashBlockerBounds;
+        private float lastGroundSplashBlockerTime = float.NegativeInfinity;
+
+        public EnvironmentZoneState CurrentState => currentState;
+        public float CurrentIntensity => currentIntensity;
+        public float TargetIntensity => targetIntensity;
 
         // 컴포넌트를 처음 붙였을 때 필요한 참조를 자동으로 채운다.
         private void Reset()
@@ -115,7 +153,7 @@ namespace UmbrellaPuzzle.Weather
 
             if (rainController != null)
             {
-                rainController.Intensity = currentIntensity;
+                ApplyIntensityToVisuals(currentIntensity);
             }
         }
 
@@ -137,7 +175,7 @@ namespace UmbrellaPuzzle.Weather
         private void Start()
         {
             hasStarted = true;
-            CacheReferences();
+            CacheReferences(true);
             DisableRainControllerAutoPlay();
             RefreshGeometry();
             SetState(currentState, true);
@@ -152,6 +190,11 @@ namespace UmbrellaPuzzle.Weather
             manualAreaSize.x = Mathf.Max(1f, manualAreaSize.x);
             manualAreaSize.y = Mathf.Max(1f, manualAreaSize.y);
             emitterTopPadding = Mathf.Max(0f, emitterTopPadding);
+            groundSplashHeightOffset = Mathf.Max(0f, groundSplashHeightOffset);
+            wetAreaHeightOffset = Mathf.Max(0f, wetAreaHeightOffset);
+            groundSplashIntensityMultiplier = Mathf.Max(0f, groundSplashIntensityMultiplier);
+            groundSplashBlockerPadding = Mathf.Max(0f, groundSplashBlockerPadding);
+            groundSplashBlockerGraceTime = Mathf.Max(0f, groundSplashBlockerGraceTime);
             intensityChangeSpeed = Mathf.Max(0.01f, intensityChangeSpeed);
 
             if (!Application.isPlaying)
@@ -168,7 +211,7 @@ namespace UmbrellaPuzzle.Weather
 
             if (rainController != null)
             {
-                rainController.Intensity = currentIntensity;
+                ApplyIntensityToVisuals(currentIntensity);
             }
 
             pendingImmediateStateApply = true;
@@ -179,6 +222,7 @@ namespace UmbrellaPuzzle.Weather
         {
             if (rainController == null)
             {
+                ApplyGroundSplashBlocker();
                 return;
             }
 
@@ -186,8 +230,11 @@ namespace UmbrellaPuzzle.Weather
             {
                 pendingImmediateStateApply = false;
                 SetState(currentState, true);
+                ApplyGroundSplashBlocker();
                 return;
             }
+
+            ApplyGroundSplashBlocker();
 
             if (Mathf.Approximately(currentIntensity, targetIntensity))
             {
@@ -201,32 +248,38 @@ namespace UmbrellaPuzzle.Weather
                 intensityChangeSpeed * Time.deltaTime
             );
 
-            rainController.Intensity = currentIntensity;
+            ApplyIntensityToVisuals(currentIntensity);
             StopRainIfHidden();
         }
 
         // 외부 퍼즐 로직에서 Rain Zone 상태를 바꿀 때 사용하는 진입점이다.
-        public void SetState(RainZoneState nextState)
+        public void SetState(EnvironmentZoneState nextState)
         {
             SetState(nextState, false);
+        }
+
+        // 이전 RainZoneVisual.RainZoneState API를 쓰는 코드가 있어도 동작하도록 남겨둔다.
+        public void SetState(RainZoneState nextState)
+        {
+            SetState((EnvironmentZoneState)(int)nextState, false);
         }
 
         // 비 구역을 작동 상태로 만든다.
         public void SetActive()
         {
-            SetState(RainZoneState.Active);
+            SetState(EnvironmentZoneState.Active);
         }
 
         // 비 구역을 비활성 상태로 만든다.
         public void SetInactive()
         {
-            SetState(RainZoneState.Inactive);
+            SetState(EnvironmentZoneState.Inactive);
         }
 
         // 비 구역을 해결 완료 상태로 만든다.
         public void SetSolved()
         {
-            SetState(RainZoneState.Solved);
+            SetState(EnvironmentZoneState.Solved);
         }
 
         // Collider 또는 수동 설정값을 다시 읽어 비 생성 범위에 반영한다.
@@ -239,8 +292,15 @@ namespace UmbrellaPuzzle.Weather
 
             if (!syncAreaFromCollider || zoneCollider == null)
             {
+                Vector3 manualGroundCenter = transform.position + Vector3.up * groundSplashHeightOffset;
+                Vector3 manualGroundSplashOffset = groundSplashController != null
+                    ? groundSplashController.transform.InverseTransformPoint(manualGroundCenter)
+                    : Vector3.zero;
+
                 rainController.SetAreaSize(manualAreaSize);
                 rainController.SetLocalEmitterOffset(Vector3.zero);
+                ApplyGroundSplashGeometry(manualAreaSize, manualGroundSplashOffset);
+                RefreshWetAreaVisual(false, default);
                 return;
             }
 
@@ -248,17 +308,45 @@ namespace UmbrellaPuzzle.Weather
             Vector2 areaSize = new Vector2(bounds.size.x, bounds.size.z);
             Vector3 topCenter = new Vector3(bounds.center.x, bounds.max.y + emitterTopPadding, bounds.center.z);
             Vector3 localEmitterOffset = rainController.transform.InverseTransformPoint(topCenter);
+            Vector3 groundCenter = new Vector3(bounds.center.x, bounds.min.y + groundSplashHeightOffset, bounds.center.z);
+            Vector3 localGroundSplashOffset = groundSplashController != null
+                ? groundSplashController.transform.InverseTransformPoint(groundCenter)
+                : Vector3.zero;
 
             rainController.SetAreaSize(areaSize);
             rainController.SetLocalEmitterOffset(localEmitterOffset);
+            ApplyGroundSplashGeometry(areaSize, localGroundSplashOffset);
+            RefreshWetAreaVisual(true, bounds);
+        }
+
+        public void SetGroundSplashBlocker(Bounds blockerBounds)
+        {
+            groundSplashBlockerBounds = blockerBounds;
+            lastGroundSplashBlockerTime = Time.time;
+            ApplyGroundSplashBlocker();
         }
 
         // 필요한 컴포넌트 참조를 자동으로 찾는다.
         private void CacheReferences()
         {
+            CacheReferences(false);
+        }
+
+        private void CacheReferences(bool allowRuntimeCreation)
+        {
             if (rainController == null)
             {
                 rainController = GetComponent<SimpleRainController>();
+            }
+
+            if (groundSplashController == null)
+            {
+                groundSplashController = GetComponent<SimpleRainSplashController>();
+            }
+
+            if (groundSplashController == null && allowRuntimeCreation && autoCreateGroundSplash)
+            {
+                groundSplashController = gameObject.AddComponent<SimpleRainSplashController>();
             }
 
             if (zoneCollider == null)
@@ -276,18 +364,21 @@ namespace UmbrellaPuzzle.Weather
         // RainZoneVisual의 상태 변경만으로 비를 켜고 끄게 한다.
         private void DisableRainControllerAutoPlay()
         {
-            if (rainController == null)
+            if (rainController != null)
             {
-                return;
+                rainController.SetPlayOnStart(false);
             }
 
-            rainController.SetPlayOnStart(false);
+            if (groundSplashController != null)
+            {
+                groundSplashController.SetPlayOnStart(false);
+            }
         }
 
         // 상태 변경을 실제 목표 강도로 변환한다.
-        private void SetState(RainZoneState nextState, bool immediate)
+        private void SetState(EnvironmentZoneState nextState, bool immediate)
         {
-            CacheReferences();
+            CacheReferences(hasStarted);
             DisableRainControllerAutoPlay();
 
             currentState = nextState;
@@ -301,6 +392,11 @@ namespace UmbrellaPuzzle.Weather
             if (targetIntensity > 0f)
             {
                 rainController.Play();
+
+                if (groundSplashController != null && groundSplashIntensityMultiplier > 0f)
+                {
+                    groundSplashController.Play();
+                }
             }
 
             if (!immediate)
@@ -309,23 +405,108 @@ namespace UmbrellaPuzzle.Weather
             }
 
             currentIntensity = targetIntensity;
-            rainController.Intensity = currentIntensity;
+            ApplyIntensityToVisuals(currentIntensity);
             StopRainIfHidden();
         }
 
         // Rain Zone 상태별 Inspector 강도 값을 반환한다.
-        private float GetIntensityForState(RainZoneState state)
+        private float GetIntensityForState(EnvironmentZoneState state)
         {
             switch (state)
             {
-                case RainZoneState.Inactive:
+                case EnvironmentZoneState.Inactive:
                     return inactiveIntensity;
 
-                case RainZoneState.Solved:
+                case EnvironmentZoneState.Solved:
                     return solvedIntensity;
 
                 default:
                     return activeIntensity;
+            }
+        }
+
+        private void ApplyIntensityToVisuals(float normalizedIntensity)
+        {
+            if (rainController != null)
+            {
+                rainController.Intensity = normalizedIntensity;
+            }
+
+            if (groundSplashController != null)
+            {
+                groundSplashController.Intensity = Mathf.Clamp01(normalizedIntensity * groundSplashIntensityMultiplier);
+            }
+
+            RefreshWetAreaVisibility(normalizedIntensity > 0.001f || targetIntensity > 0.001f);
+        }
+
+        private void ApplyGroundSplashGeometry(Vector2 size, Vector3 localOffset)
+        {
+            if (groundSplashController == null)
+            {
+                return;
+            }
+
+            groundSplashController.SetAreaSize(size);
+            groundSplashController.SetLocalEmitterOffset(localOffset);
+            ApplyGroundSplashBlocker();
+        }
+
+        private void ApplyGroundSplashBlocker()
+        {
+            if (groundSplashController == null)
+            {
+                return;
+            }
+
+            bool hasRecentBlocker = Application.isPlaying
+                && Time.time - lastGroundSplashBlockerTime <= groundSplashBlockerGraceTime
+                && (currentIntensity > 0.001f || targetIntensity > 0.001f);
+
+            if (!hasRecentBlocker)
+            {
+                groundSplashController.ClearWorldExclusionArea();
+                return;
+            }
+
+            Vector2 blockerSize = new Vector2(
+                groundSplashBlockerBounds.size.x + groundSplashBlockerPadding * 2f,
+                groundSplashBlockerBounds.size.z + groundSplashBlockerPadding * 2f
+            );
+
+            groundSplashController.SetWorldExclusionArea(groundSplashBlockerBounds.center, blockerSize);
+        }
+
+        private void RefreshWetAreaVisual(bool hasBounds, Bounds bounds)
+        {
+            if (wetAreaVisual == null)
+            {
+                return;
+            }
+
+            if (syncWetAreaFromCollider && hasBounds)
+            {
+                Vector3 wetPosition = new Vector3(bounds.center.x, bounds.min.y + wetAreaHeightOffset, bounds.center.z);
+                wetAreaVisual.transform.position = wetPosition;
+                wetAreaVisual.transform.rotation = Quaternion.identity;
+
+                Vector3 localScale = wetAreaVisual.transform.localScale;
+                wetAreaVisual.transform.localScale = new Vector3(bounds.size.x, localScale.y, bounds.size.z);
+            }
+
+            RefreshWetAreaVisibility(currentIntensity > 0.001f || targetIntensity > 0.001f);
+        }
+
+        private void RefreshWetAreaVisibility(bool visible)
+        {
+            if (wetAreaVisual == null)
+            {
+                return;
+            }
+
+            if (wetAreaVisual.activeSelf != visible)
+            {
+                wetAreaVisual.SetActive(visible);
             }
         }
 
@@ -338,6 +519,14 @@ namespace UmbrellaPuzzle.Weather
             }
 
             rainController.Stop(true);
+
+            if (groundSplashController != null)
+            {
+                groundSplashController.Stop(true);
+                groundSplashController.ClearWorldExclusionArea();
+            }
+
+            RefreshWetAreaVisibility(false);
         }
 
         // Scene View에서 선택했을 때 Rain Zone의 시각 범위를 확인하기 위한 보조 표시다.

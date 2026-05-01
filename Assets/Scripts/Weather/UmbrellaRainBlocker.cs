@@ -40,6 +40,12 @@ namespace UmbrellaPuzzle.Weather
         private BoxCollider blockerCollider;
         private Transform blockerTransform;
 
+        public BoxCollider BlockerCollider => blockerCollider;
+        public Transform BlockerTransform => blockerTransform;
+        public Vector3 BlockerSize => blockerSize;
+        public bool IsBlocking => blockerCollider != null && blockerCollider.enabled;
+        public PlayerUmbrellaController UmbrellaController => umbrellaController;
+
         private void Reset()
         {
             CacheReferences();
