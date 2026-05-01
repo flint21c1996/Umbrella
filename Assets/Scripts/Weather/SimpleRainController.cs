@@ -156,7 +156,11 @@ namespace UmbrellaPuzzle.Weather
             }
 
             ApplySettings();
-            Play();
+
+            if (playOnStart)
+            {
+                Play();
+            }
         }
 
         // 모든 Awake가 끝난 뒤 자식 Particle System을 만들고 비를 재생한다.
