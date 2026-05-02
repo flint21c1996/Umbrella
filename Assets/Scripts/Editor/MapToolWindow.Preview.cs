@@ -28,6 +28,7 @@ public partial class MapToolWindow : EditorWindow
 
         previewInstance.name = $"{selectedPrefab.name}_Preview";
         previewInstance.hideFlags = HideFlags.HideAndDontSave;
+        previewInstance.transform.localScale = GetPlacementLocalScale();
 
         foreach (Collider collider in previewInstance.GetComponentsInChildren<Collider>(true))
         {
@@ -45,6 +46,11 @@ public partial class MapToolWindow : EditorWindow
 
     private void UpdatePreviewTransform(Vector3 position, Quaternion rotation)
     {
+        UpdatePreviewTransform(position, rotation, GetPlacementLocalScale());
+    }
+
+    private void UpdatePreviewTransform(Vector3 position, Quaternion rotation, Vector3 localScale)
+    {
         EnsurePreviewInstance();
         if (previewInstance == null)
         {
@@ -53,6 +59,7 @@ public partial class MapToolWindow : EditorWindow
 
         previewInstance.transform.position = position;
         previewInstance.transform.rotation = rotation;
+        previewInstance.transform.localScale = localScale;
         UpdatePreviewVisibility(true);
     }
 
@@ -107,7 +114,7 @@ public partial class MapToolWindow : EditorWindow
         previewInstance.SetActive(visible);
     }
 
-    private void UpdatePreviewMaterial(bool occupied)
+    private void UpdatePreviewMaterial(bool occupied, bool overlapsPlacedObject = false)
     {
         // 점유 상태만 색으로 바꾸고, material 자체는 하나를 공유해서 preview 비용을 줄인다.
         EnsurePreviewMaterial();
@@ -120,7 +127,9 @@ public partial class MapToolWindow : EditorWindow
 
         Color previewColor = occupied
             ? new Color(1.0f, 0.3f, 0.3f, 0.35f)
-            : new Color(0.35f, 0.85f, 1.0f, 0.35f);
+            : overlapsPlacedObject
+                ? new Color(1.0f, 0.8f, 0.2f, 0.35f)
+                : new Color(0.35f, 0.85f, 1.0f, 0.35f);
 
         previewMaterial.SetColor("_BaseColor", previewColor);
 

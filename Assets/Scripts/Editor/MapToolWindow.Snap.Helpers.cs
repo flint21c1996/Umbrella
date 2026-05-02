@@ -87,8 +87,14 @@ public partial class MapToolWindow : EditorWindow
 
     private bool TryCollectPreviewWorldPointsAt(Vector3 position, Quaternion rotation, out List<Vector3> points, out Vector3 center, out float radius)
     {
+        return TryCollectPreviewWorldPointsAt(position, rotation, previewInstance.transform.localScale, out points, out center, out radius);
+    }
+
+    private bool TryCollectPreviewWorldPointsAt(Vector3 position, Quaternion rotation, Vector3 localScale, out List<Vector3> points, out Vector3 center, out float radius)
+    {
         previewInstance.transform.position = position;
         previewInstance.transform.rotation = rotation;
+        previewInstance.transform.localScale = localScale;
         points = new List<Vector3>();
         return TryCollectPreviewWorldPoints(points, out center, out radius);
     }

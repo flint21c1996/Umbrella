@@ -13,20 +13,33 @@ public partial class MapToolWindow : EditorWindow
         Vertex
     }
 
+    private enum PlacementRotationAxis
+    {
+        X,
+        Y,
+        Z
+    }
+
     private GameObject selectedPrefab;
     private GameObject floorPrefab;
     private GameObject wallPrefab;
     private GameObject stairPrefab;
     private Material selectedMaterial;
+    private Material placementMaterial;
     private Transform placementParent;
 
+    private const float MinimumPlacementScale = 0.01f;
+
     private float gridSize = 1.0f;
-    private float heightStep = 1.0f;
+    private float heightStep = 0.1f;
     private float neighborSnapDistance = 0.5f;
     private float neighborAngleSnapThreshold = 10.0f;
     private float faceAssistSnapDistance = 0.2f;
-    private int heightLevel;
+    private Vector3 placementScale = Vector3.one;
+    private Vector3 randomScaleAmount = Vector3.zero;
+    private float heightOffset;
     private float currentRotationDegrees;
+    private PlacementRotationAxis rotationAxis = PlacementRotationAxis.Y;
     private bool placementEnabled = true;
     private bool showGrid = true;
     private bool snapToSurface = true;
@@ -34,12 +47,21 @@ public partial class MapToolWindow : EditorWindow
     private bool snapToNeighbor;
     private bool alignToSurfaceNormal;
     private bool autoAlignToNeighbor = true;
+    private bool fitBetweenNearbyFaces = true;
+    private bool showOverlapWarning = true;
     private bool showMeshColliderBounds;
     private bool showAdvancedPlacementOptions;
+    private bool uniformPlacementScale = true;
+    private bool randomizeScaleX;
+    private bool randomizeScaleY;
+    private bool randomizeScaleZ;
     private NeighborSnapMode neighborSnapMode = NeighborSnapMode.Face;
     private int previewGridRadius = 12;
+    // Map Tool 옵션이 길어져도 창 아래쪽 항목을 놓치지 않도록 현재 스크롤 위치를 보관한다.
+    private Vector2 scrollPosition;
     private Vector2 lastMousePosition;
     private bool lastPreviewOccupied;
+    private bool lastPreviewOverlapsPlacedObject;
     private bool isDragPlacing;
     private GameObject previewInstance;
     private Material previewMaterial;
@@ -51,8 +73,21 @@ public partial class MapToolWindow : EditorWindow
     private Vector3 lastSurfaceNormal = Vector3.up;
     private Vector3 lastPreviewPosition;
     private Quaternion lastPreviewRotation = Quaternion.identity;
+    private bool hasLastPreviewTransform;
+    private bool editPlacementScaleInScene;
+    private bool hasScaleEditPose;
+    private Vector3 scaleEditPosition;
+    private Quaternion scaleEditRotation = Quaternion.identity;
+    private bool editPlacementHeightInScene;
+    private bool hasHeightEditPose;
+    private Vector3 heightEditPosition;
+    private Quaternion heightEditRotation = Quaternion.identity;
+    private float heightEditBaseOffset;
+    private float heightEditBaseY;
     private bool lastUsedNeighborSnap;
     private string lastHitColliderName = "None";
+    private string lastOverlapColliderName = "None";
+    private Collider lastPreviewOverlapCollider;
     private bool hasHoveredFaceAnchor;
     private Collider hoveredFaceCollider;
     private readonly List<Vector3> hoveredFacePoints = new();
@@ -83,6 +118,9 @@ public partial class MapToolWindow : EditorWindow
 
     private void OnGUI()
     {
+        // EditorWindow 높이가 작을 때도 모든 배치 옵션을 확인할 수 있게 전체 UI를 스크롤 영역으로 감싼다.
+        scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition);
+
         // 자주 쓰는 블록 prefab은 상단에서 바로 갈아끼우고,
         // 실제 배치 파라미터는 아래 섹션에서 조절하는 흐름으로 구성했다.
         EditorGUILayout.LabelField("프리팹 프리셋", EditorStyles.boldLabel);
@@ -142,9 +180,102 @@ public partial class MapToolWindow : EditorWindow
             SetSelectedPrefab(prefabFieldValue);
         }
 
+        placementMaterial = (Material)EditorGUILayout.ObjectField(
+            new GUIContent("Placement Material", "배치할 때 바로 적용할 material입니다. 비워두면 prefab의 기존 material을 유지합니다."),
+            placementMaterial,
+            typeof(Material),
+            false
+        );
         gridSize = Mathf.Max(0.1f, EditorGUILayout.FloatField(new GUIContent("Grid Size", "배치 위치를 맞출 grid 한 칸의 크기입니다."), gridSize));
-        heightStep = Mathf.Max(0.1f, EditorGUILayout.FloatField(new GUIContent("Height Step", "Height Level이 1 증가할 때 올라가는 높이값입니다."), heightStep));
-        heightLevel = EditorGUILayout.IntField(new GUIContent("Height Level", "현재 배치 높이 단계입니다. [ / ] 키로도 조절할 수 있습니다."), heightLevel);
+        heightStep = Mathf.Max(0.01f, EditorGUILayout.FloatField(new GUIContent("Height Nudge", "1 / 3 키를 누를 때마다 움직이는 높이값입니다."), heightStep));
+        rotationAxis = (PlacementRotationAxis)EditorGUILayout.EnumPopup(
+            new GUIContent("Rotation Axis", "Q/E/R 키와 Rotate 버튼이 회전시킬 축입니다."),
+            rotationAxis
+        );
+
+        EditorGUI.BeginChangeCheck();
+        float nextHeightOffset = EditorGUILayout.FloatField(new GUIContent("Height Offset", "현재 배치 높이 오프셋입니다. 1 / 3 키로도 조금씩 조절할 수 있습니다."), heightOffset);
+        if (EditorGUI.EndChangeCheck())
+        {
+            SetHeightOffset(nextHeightOffset);
+        }
+
+        bool nextEditPlacementHeight = GUILayout.Toggle(
+            editPlacementHeightInScene,
+            new GUIContent("Height 바꾸기", "Scene View에 transform handle을 띄워 현재 배치 높이를 눈으로 조절합니다."),
+            "Button"
+        );
+        if (nextEditPlacementHeight != editPlacementHeightInScene)
+        {
+            SetHeightEditMode(nextEditPlacementHeight);
+        }
+
+        bool nextUniformPlacementScale = EditorGUILayout.Toggle(
+            new GUIContent("Uniform Scale", "켜면 X/Y/Z 배율을 같은 값으로 유지합니다. 한 축을 바꾸면 나머지 축도 같이 맞춰집니다."),
+            uniformPlacementScale
+        );
+        if (nextUniformPlacementScale != uniformPlacementScale)
+        {
+            uniformPlacementScale = nextUniformPlacementScale;
+            if (uniformPlacementScale)
+            {
+                placementScale = MakeUniformPlacementScale(placementScale.x);
+            }
+        }
+
+        Vector3 nextPlacementScale = EditorGUILayout.Vector3Field(new GUIContent("Scale Multiplier", "prefab의 기본 scale에 곱해지는 X/Y/Z 배율입니다. 1, 1, 1이면 prefab 원래 크기를 유지합니다."), placementScale);
+        placementScale = ApplyPlacementScaleInput(nextPlacementScale);
+        if (selectedPrefab != null)
+        {
+            EditorGUILayout.LabelField("Prefab Base Scale", GetSelectedPrefabBaseScale().ToString("F2"));
+        }
+
+        fitBetweenNearbyFaces = EditorGUILayout.Toggle(
+            new GUIContent("Fit Between Faces", "켜면 주변 면 사이에 들어갈 때 X/Z 크기를 자동으로 맞춥니다. 랜덤 스케일 여부와 상관없이 동작합니다."),
+            fitBetweenNearbyFaces
+        );
+        showOverlapWarning = EditorGUILayout.Toggle(
+            new GUIContent("Show Overlap Warning", "켜면 배치 미리보기가 기존 오브젝트와 겹칠 때 노란색 경고와 겹친 collider 이름을 보여줍니다. 배치를 막지는 않습니다."),
+            showOverlapWarning
+        );
+
+        EditorGUILayout.LabelField(new GUIContent("Scale Random Range", "직접 배치할 때 체크된 축에 랜덤 배율을 적용합니다. 닿아 있는 face가 있으면 그 face는 고정하고 열린 방향으로 크기 변화가 반영됩니다."), EditorStyles.boldLabel);
+        DrawRandomScaleAxisControl(
+            new GUIContent("X", "X축 배율에 랜덤값을 적용합니다."),
+            new GUIContent("Range", "X축 기준 배율에서 위아래로 얼마까지 흔들릴지 정합니다. 예: 0.2면 0.8 ~ 1.2"),
+            ref randomizeScaleX,
+            ref randomScaleAmount.x);
+        DrawRandomScaleAxisControl(
+            new GUIContent("Y", "Y축 배율에 랜덤값을 적용합니다."),
+            new GUIContent("Range", "Y축 기준 배율에서 위아래로 얼마까지 흔들릴지 정합니다. 예: 0.2면 0.8 ~ 1.2"),
+            ref randomizeScaleY,
+            ref randomScaleAmount.y);
+        DrawRandomScaleAxisControl(
+            new GUIContent("Z", "Z축 배율에 랜덤값을 적용합니다."),
+            new GUIContent("Range", "Z축 기준 배율에서 위아래로 얼마까지 흔들릴지 정합니다. 예: 0.2면 0.8 ~ 1.2"),
+            ref randomizeScaleZ,
+            ref randomScaleAmount.z);
+
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            bool nextEditPlacementScale = GUILayout.Toggle(
+                editPlacementScaleInScene,
+                new GUIContent("Size 바꾸기", "Scene View에 scale handle을 띄워 현재 배치 scale을 눈으로 조절합니다."),
+                "Button"
+            );
+            if (nextEditPlacementScale != editPlacementScaleInScene)
+            {
+                SetScaleEditMode(nextEditPlacementScale);
+            }
+
+            if (GUILayout.Button(new GUIContent("Size Reset", "배치 배율을 1, 1, 1로 되돌립니다. prefab 원래 크기로 배치됩니다.")))
+            {
+                placementScale = MakeUniformPlacementScale(1.0f);
+                Repaint();
+                SceneView.RepaintAll();
+            }
+        }
+
         snapToSurface = EditorGUILayout.Toggle(new GUIContent("Snap To Surface", "클릭한 collider의 윗면(top surface)을 support로 사용해 prefab 바닥면이 닿도록 배치합니다."), snapToSurface);
         snapToNeighbor = EditorGUILayout.Toggle(new GUIContent("Snap To Neighbor", "주변 collider의 face, edge, vertex 기준으로 prefab을 붙입니다."), snapToNeighbor);
         neighborSnapMode = (NeighborSnapMode)EditorGUILayout.EnumPopup(
@@ -206,7 +337,7 @@ public partial class MapToolWindow : EditorWindow
             "- Q / E: 1도 회전\n" +
             "- R: 90도 회전\n" +
             "- Delete: 선택 오브젝트 삭제\n" +
-            "- [ / ]: 높이 단계 조절\n" +
+            "- 1 / 3: 높이 미세 조절\n" +
             "- Alt: 주변 오브젝트 붙이기 임시 활성화",
             MessageType.Info
         );
@@ -228,14 +359,12 @@ public partial class MapToolWindow : EditorWindow
         {
             if (GUILayout.Button("Height -"))
             {
-                heightLevel--;
-                Repaint();
+                ChangeHeightOffset(-heightStep);
             }
 
             if (GUILayout.Button("Height +"))
             {
-                heightLevel++;
-                Repaint();
+                ChangeHeightOffset(heightStep);
             }
         }
 
@@ -279,10 +408,248 @@ public partial class MapToolWindow : EditorWindow
         // 디버그용 상태값은 지금 배치 계산이 무엇을 기준으로 굴러가는지
         // 빠르게 확인할 수 있게 최소 정보만 노출한다.
         EditorGUILayout.LabelField("Height Offset", GetCurrentHeight().ToString("F2"));
-        EditorGUILayout.LabelField("Current Rotation", $"{currentRotationDegrees:F1}도");
+        EditorGUILayout.LabelField("Current Rotation", $"{rotationAxis} {currentRotationDegrees:F1}도");
+        EditorGUILayout.LabelField("Scale Random", GetScaleRandomSummary());
         EditorGUILayout.LabelField("Preview Occupied", lastPreviewOccupied ? "사용 중" : "비어 있음");
         EditorGUILayout.LabelField("Current Hit Collider", lastHitColliderName);
         EditorGUILayout.LabelField("Hovered Face", hasHoveredFaceAnchor && hoveredFaceCollider != null ? hoveredFaceCollider.name : "None");
         EditorGUILayout.LabelField("Recent Placements", recentPlacements.Count.ToString());
+
+        EditorGUILayout.EndScrollView();
+    }
+
+    private void DrawRandomScaleAxisControl(GUIContent toggleLabel, GUIContent amountLabel, ref bool enabled, ref float amount)
+    {
+        using (new EditorGUILayout.HorizontalScope())
+        {
+            enabled = EditorGUILayout.ToggleLeft(toggleLabel, enabled, GUILayout.Width(42.0f));
+
+            using (new EditorGUI.DisabledScope(!enabled))
+            {
+                amount = Mathf.Max(0.0f, EditorGUILayout.FloatField(amountLabel, amount));
+            }
+
+            GUILayout.Label($"±{amount:F2}", GUILayout.Width(70.0f));
+        }
+    }
+
+    private Vector3 SanitizePlacementScale(Vector3 scale)
+    {
+        // 0 이하 scale은 preview bounds 계산과 실제 배치가 뒤집히거나 사라지는 원인이 된다.
+        // 맵툴에서는 "prefab 기본 scale에 곱하는 배율"로 쓰기 위해 아주 작은 양수까지로 제한한다.
+        return new Vector3(
+            Mathf.Max(MinimumPlacementScale, scale.x),
+            Mathf.Max(MinimumPlacementScale, scale.y),
+            Mathf.Max(MinimumPlacementScale, scale.z));
+    }
+
+    private Vector3 ApplyPlacementScaleInput(Vector3 nextScale)
+    {
+        nextScale = SanitizePlacementScale(nextScale);
+
+        if (!uniformPlacementScale)
+        {
+            return nextScale;
+        }
+
+        // Uniform Scale이 켜져 있으면 가장 크게 바뀐 축의 값을 기준으로 세 축을 모두 맞춘다.
+        // Inspector에서 X만 입력하거나 Scene View에서 한 축 손잡이를 잡아도 같은 크기로 유지하기 위함이다.
+        float uniformValue = GetMostChangedScaleAxisValue(placementScale, nextScale);
+        return MakeUniformPlacementScale(uniformValue);
+    }
+
+    private float GetMostChangedScaleAxisValue(Vector3 previousScale, Vector3 nextScale)
+    {
+        float xDelta = Mathf.Abs(nextScale.x - previousScale.x);
+        float yDelta = Mathf.Abs(nextScale.y - previousScale.y);
+        float zDelta = Mathf.Abs(nextScale.z - previousScale.z);
+
+        if (yDelta > xDelta && yDelta >= zDelta)
+        {
+            return nextScale.y;
+        }
+
+        if (zDelta > xDelta && zDelta > yDelta)
+        {
+            return nextScale.z;
+        }
+
+        return nextScale.x;
+    }
+
+    private Vector3 MakeUniformPlacementScale(float scale)
+    {
+        float sanitizedScale = Mathf.Max(MinimumPlacementScale, scale);
+        return new Vector3(sanitizedScale, sanitizedScale, sanitizedScale);
+    }
+
+    private Vector3 GetSelectedPrefabBaseScale()
+    {
+        return selectedPrefab != null ? selectedPrefab.transform.localScale : Vector3.one;
+    }
+
+    private Vector3 GetPlacementLocalScale()
+    {
+        // placementScale은 최종 localScale이 아니라 prefab 기본 scale에 곱하는 배율이다.
+        // 그래야 Project 창에서 직접 끌어놓은 크기와 Map Tool로 찍은 기본 크기가 같아진다.
+        return Vector3.Scale(GetSelectedPrefabBaseScale(), placementScale);
+    }
+
+    private Vector3 GetRandomizedPlacementLocalScale()
+    {
+        // Preview는 기준 크기를 보여주고, 실제 배치 순간에만 랜덤 배율을 한 번 뽑는다.
+        // 그래야 마우스를 움직일 때 preview가 계속 흔들리지 않고, 찍힌 결과만 자연스럽게 달라진다.
+        return Vector3.Scale(GetSelectedPrefabBaseScale(), GetRandomizedPlacementScaleMultiplier());
+    }
+
+    private Vector3 GetRandomizedPlacementScaleMultiplier()
+    {
+        Vector3 randomizedScale = placementScale;
+
+        if (randomizeScaleX)
+        {
+            randomizedScale.x += UnityEngine.Random.Range(-randomScaleAmount.x, randomScaleAmount.x);
+        }
+
+        if (randomizeScaleY)
+        {
+            randomizedScale.y += UnityEngine.Random.Range(-randomScaleAmount.y, randomScaleAmount.y);
+        }
+
+        if (randomizeScaleZ)
+        {
+            randomizedScale.z += UnityEngine.Random.Range(-randomScaleAmount.z, randomScaleAmount.z);
+        }
+
+        return SanitizePlacementScale(randomizedScale);
+    }
+
+    private string GetScaleRandomSummary()
+    {
+        if (!HasScaleRandomEnabled())
+        {
+            return "Off";
+        }
+
+        return $"X:{GetRandomAxisSummary(randomizeScaleX, randomScaleAmount.x)} Y:{GetRandomAxisSummary(randomizeScaleY, randomScaleAmount.y)} Z:{GetRandomAxisSummary(randomizeScaleZ, randomScaleAmount.z)}";
+    }
+
+    private string GetRandomAxisSummary(bool enabled, float amount)
+    {
+        return enabled ? $"±{amount:F2}" : "-";
+    }
+
+    private bool HasScaleRandomEnabled()
+    {
+        return randomizeScaleX || randomizeScaleY || randomizeScaleZ;
+    }
+
+    private Vector3 GetPlacementScaleMultiplierFromLocalScale(Vector3 localScale)
+    {
+        Vector3 baseScale = GetSelectedPrefabBaseScale();
+        return SanitizePlacementScale(new Vector3(
+            SafeDivideScale(localScale.x, baseScale.x),
+            SafeDivideScale(localScale.y, baseScale.y),
+            SafeDivideScale(localScale.z, baseScale.z)));
+    }
+
+    private float SafeDivideScale(float value, float divisor)
+    {
+        if (Mathf.Abs(divisor) <= 0.0001f)
+        {
+            return value;
+        }
+
+        return value / divisor;
+    }
+
+    private void SetScaleEditMode(bool enabled)
+    {
+        editPlacementScaleInScene = enabled;
+
+        if (editPlacementScaleInScene)
+        {
+            editPlacementHeightInScene = false;
+            hasHeightEditPose = false;
+            CaptureScaleEditPose();
+        }
+        else
+        {
+            hasScaleEditPose = false;
+        }
+
+        Repaint();
+        SceneView.RepaintAll();
+    }
+
+    private void SetHeightEditMode(bool enabled)
+    {
+        editPlacementHeightInScene = enabled;
+
+        if (editPlacementHeightInScene)
+        {
+            editPlacementScaleInScene = false;
+            hasScaleEditPose = false;
+            CaptureHeightEditPose();
+        }
+        else
+        {
+            hasHeightEditPose = false;
+        }
+
+        Repaint();
+        SceneView.RepaintAll();
+    }
+
+    private void CaptureScaleEditPose()
+    {
+        if (!hasLastPreviewTransform)
+        {
+            hasScaleEditPose = false;
+            return;
+        }
+
+        scaleEditPosition = lastPreviewPosition;
+        scaleEditRotation = lastPreviewRotation;
+        hasScaleEditPose = true;
+    }
+
+    private void CaptureHeightEditPose()
+    {
+        if (!hasLastPreviewTransform)
+        {
+            hasHeightEditPose = false;
+            return;
+        }
+
+        heightEditPosition = lastPreviewPosition;
+        heightEditRotation = lastPreviewRotation;
+        heightEditBaseOffset = heightOffset;
+        heightEditBaseY = lastPreviewPosition.y;
+        hasHeightEditPose = true;
+    }
+
+    private void ChangeHeightOffset(float delta)
+    {
+        SetHeightOffset(heightOffset + delta);
+    }
+
+    private void SetHeightOffset(float nextHeightOffset)
+    {
+        if (Mathf.Approximately(heightOffset, nextHeightOffset))
+        {
+            return;
+        }
+
+        float delta = nextHeightOffset - heightOffset;
+        heightOffset = nextHeightOffset;
+
+        if (hasHeightEditPose)
+        {
+            heightEditPosition += Vector3.up * delta;
+        }
+
+        Repaint();
+        SceneView.RepaintAll();
     }
 }
