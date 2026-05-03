@@ -33,16 +33,7 @@ namespace UmbrellaPuzzle.Weather
         [SerializeField, Tooltip("비가 내려야 하는 퍼즐 구역의 Collider입니다. Sync Area From Collider가 켜져 있으면 이 크기로 비 영역을 맞춥니다.")]
         private Collider zoneCollider;
 
-        [Header("Optional Visuals")]
-
-        [SerializeField, Tooltip("비가 활성화될 때 켜지는 젖은 바닥 표시 오브젝트입니다. Decal, 얇은 Plane, Mesh 등을 연결할 수 있습니다.")]
-        private GameObject wetAreaVisual;
-
-        [SerializeField, Tooltip("Wet Area Visual을 Collider 바닥 중앙과 X/Z 크기에 맞춰 자동 배치합니다.")]
-        private bool syncWetAreaFromCollider = true;
-
-        [SerializeField, Tooltip("Wet Area Visual을 Collider 바닥면보다 살짝 위에 띄우는 높이입니다.")]
-        private float wetAreaHeightOffset = 0.02f;
+        
 
         [Header("Geometry")]
 
@@ -191,7 +182,6 @@ namespace UmbrellaPuzzle.Weather
             manualAreaSize.y = Mathf.Max(1f, manualAreaSize.y);
             emitterTopPadding = Mathf.Max(0f, emitterTopPadding);
             groundSplashHeightOffset = Mathf.Max(0f, groundSplashHeightOffset);
-            wetAreaHeightOffset = Mathf.Max(0f, wetAreaHeightOffset);
             groundSplashIntensityMultiplier = Mathf.Max(0f, groundSplashIntensityMultiplier);
             groundSplashBlockerPadding = Mathf.Max(0f, groundSplashBlockerPadding);
             groundSplashBlockerGraceTime = Mathf.Max(0f, groundSplashBlockerGraceTime);
@@ -300,7 +290,6 @@ namespace UmbrellaPuzzle.Weather
                 rainController.SetAreaSize(manualAreaSize);
                 rainController.SetLocalEmitterOffset(Vector3.zero);
                 ApplyGroundSplashGeometry(manualAreaSize, manualGroundSplashOffset);
-                RefreshWetAreaVisual(false, default);
                 return;
             }
 
@@ -316,7 +305,6 @@ namespace UmbrellaPuzzle.Weather
             rainController.SetAreaSize(areaSize);
             rainController.SetLocalEmitterOffset(localEmitterOffset);
             ApplyGroundSplashGeometry(areaSize, localGroundSplashOffset);
-            RefreshWetAreaVisual(true, bounds);
         }
 
         public void SetGroundSplashBlocker(Bounds blockerBounds)
@@ -436,8 +424,6 @@ namespace UmbrellaPuzzle.Weather
             {
                 groundSplashController.Intensity = Mathf.Clamp01(normalizedIntensity * groundSplashIntensityMultiplier);
             }
-
-            RefreshWetAreaVisibility(normalizedIntensity > 0.001f || targetIntensity > 0.001f);
         }
 
         private void ApplyGroundSplashGeometry(Vector2 size, Vector3 localOffset)
@@ -477,38 +463,8 @@ namespace UmbrellaPuzzle.Weather
             groundSplashController.SetWorldExclusionArea(groundSplashBlockerBounds.center, blockerSize);
         }
 
-        private void RefreshWetAreaVisual(bool hasBounds, Bounds bounds)
-        {
-            if (wetAreaVisual == null)
-            {
-                return;
-            }
+      
 
-            if (syncWetAreaFromCollider && hasBounds)
-            {
-                Vector3 wetPosition = new Vector3(bounds.center.x, bounds.min.y + wetAreaHeightOffset, bounds.center.z);
-                wetAreaVisual.transform.position = wetPosition;
-                wetAreaVisual.transform.rotation = Quaternion.identity;
-
-                Vector3 localScale = wetAreaVisual.transform.localScale;
-                wetAreaVisual.transform.localScale = new Vector3(bounds.size.x, localScale.y, bounds.size.z);
-            }
-
-            RefreshWetAreaVisibility(currentIntensity > 0.001f || targetIntensity > 0.001f);
-        }
-
-        private void RefreshWetAreaVisibility(bool visible)
-        {
-            if (wetAreaVisual == null)
-            {
-                return;
-            }
-
-            if (wetAreaVisual.activeSelf != visible)
-            {
-                wetAreaVisual.SetActive(visible);
-            }
-        }
 
         // 비가 완전히 숨겨진 상태라면 Particle System을 멈춰 불필요한 생성을 줄인다.
         private void StopRainIfHidden()
@@ -525,8 +481,6 @@ namespace UmbrellaPuzzle.Weather
                 groundSplashController.Stop(true);
                 groundSplashController.ClearWorldExclusionArea();
             }
-
-            RefreshWetAreaVisibility(false);
         }
 
         // Scene View에서 선택했을 때 Rain Zone의 시각 범위를 확인하기 위한 보조 표시다.
