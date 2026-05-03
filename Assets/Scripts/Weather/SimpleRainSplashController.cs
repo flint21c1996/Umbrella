@@ -37,6 +37,9 @@ namespace UmbrellaPuzzle.Weather
         [SerializeField, Tooltip("물튐 파티클이 유지되는 시간입니다.")]
         private float lifetime = 0.32f;
 
+        [SerializeField, Tooltip("물튐 파티클에 적용할 중력 배율 범위입니다. 생성되는 Particle System의 Gravity Modifier를 Random Between Two Constants로 설정합니다.")]
+        private Vector2 gravityModifierRange = new Vector2(0.3f, 1f);
+
         [Header("Look")]
 
         [SerializeField, Tooltip("물튐 파티클 렌더링에 사용할 머티리얼입니다. 비워두면 공유 런타임 머티리얼을 자동 생성합니다.")]
@@ -52,6 +55,8 @@ namespace UmbrellaPuzzle.Weather
         private const string SegmentObjectPrefix = "Ground Splash Segment ";
         private const int SegmentCount = 4;
         private const float MinSegmentSize = 0.05f;
+        private const float MinGravityModifier = 0.3f;
+        private const float MaxGravityModifier = 1f;
 
         private static Material sharedRuntimeMaterial;
 
@@ -161,6 +166,7 @@ namespace UmbrellaPuzzle.Weather
             upwardSpeedRange.y = Mathf.Max(upwardSpeedRange.x, upwardSpeedRange.y);
             horizontalSpread = Mathf.Max(0f, horizontalSpread);
             lifetime = Mathf.Max(0.05f, lifetime);
+            gravityModifierRange = ClampGravityModifierRange(gravityModifierRange);
             particleSize = Mathf.Max(0.001f, particleSize);
 
             if (!Application.isPlaying || splashParticles == null || splashRenderer == null)
@@ -490,6 +496,11 @@ namespace UmbrellaPuzzle.Weather
             main.startSpeed = 0f;
             main.startSize = particleSize;
             main.startColor = splashColor;
+            Vector2 resolvedGravityModifierRange = ClampGravityModifierRange(gravityModifierRange);
+            main.gravityModifier = new ParticleSystem.MinMaxCurve(
+                resolvedGravityModifierRange.x,
+                resolvedGravityModifierRange.y
+            );
             main.playOnAwake = false;
 
             ParticleSystem.EmissionModule emission = particles.emission;
@@ -570,6 +581,19 @@ namespace UmbrellaPuzzle.Weather
             ParticleSystem.EmissionModule emission = splashParticles.emission;
             emission.enabled = true;
             emission.rateOverTime = maxEmissionRate * intensity;
+        }
+
+        private Vector2 ClampGravityModifierRange(Vector2 range)
+        {
+            float min = Mathf.Clamp(range.x, MinGravityModifier, MaxGravityModifier);
+            float max = Mathf.Clamp(range.y, MinGravityModifier, MaxGravityModifier);
+
+            if (max < min)
+            {
+                max = min;
+            }
+
+            return new Vector2(min, max);
         }
 
         private Material GetOrCreateSplashMaterial()
