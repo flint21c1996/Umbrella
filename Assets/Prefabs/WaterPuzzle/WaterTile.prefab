@@ -12,7 +12,6 @@ GameObject:
   - component: {fileID: 3451118167685721567}
   - component: {fileID: 1324015425006542376}
   - component: {fileID: 1578249271392974127}
-  - component: {fileID: 6349782325842998804}
   - component: {fileID: 5849152312646915790}
   m_Layer: 0
   m_Name: WaterTile
@@ -115,27 +114,6 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 1, y: 1, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
---- !u!114 &6349782325842998804
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 6140274694607554022}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 379fb3a8dba4ecf48abf4b21dea6c332, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::UmbrellaWaterTarget
-  requiredWater: 0.5
-  weightedRigidbody: {fileID: 0}
-  addWaterToRigidbodyMass: 1
-  waterWeightMultiplier: 1
-  targetRenderer: {fileID: 1324015425006542376}
-  idleColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-  activatedColor: {r: 0, g: 1, b: 0, a: 1}
-  receivedWater: 0
-  isActivated: 0
 --- !u!114 &5849152312646915790
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -148,7 +126,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 43002c99bcb43c444929f5258634bb2f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::WaterBasinTarget
-  umbrellaWaterTarget: {fileID: 6349782325842998804}
+  umbrellaWaterTarget: {fileID: 0}
   findUmbrellaTargetInParent: 1
   useUmbrellaTargetAsInput: 1
   connectedTargets:
