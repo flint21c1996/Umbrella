@@ -6,18 +6,6 @@ using UnityEngine.Serialization;
 [DisallowMultipleComponent]
 public class GameDebugController : MonoBehaviour
 {
-    public enum WaterBasinConnectionPreviewScope
-    {
-        // 에디터에서 선택한 WaterBasinTarget을 기준으로 Scene View 연결선만 표시합니다.
-        SelectedTargets,
-
-        // 아래 Water Basin Connection Preview Target에 지정한 타겟을 기준으로 Scene View 연결선만 표시합니다.
-        SpecificTarget,
-
-        // 씬에 있는 모든 WaterBasinTarget의 Scene View 연결선을 표시합니다.
-        AllTargets
-    }
-
     public enum WaterBasinDebugOverlayScope
     {
         // 지정한 WaterBasinTarget 하나의 런타임 물 정보를 Game View에 표시합니다.
@@ -78,35 +66,11 @@ public class GameDebugController : MonoBehaviour
     [Tooltip("표시 범위가 Specific Target 또는 Specific Connected Group일 때 기준으로 사용할 WaterBasinTarget입니다.")]
     [SerializeField] private WaterBasinTarget waterBasinDebugOverlayTarget;
 
-    [Tooltip("에디터 Scene View에서 WaterBasinTarget 자동 연결 후보선을 표시한다.")]
-    [SerializeField] private bool showWaterBasinAutoConnectionPreview = true;
-
-    [Tooltip("WaterBasinTarget 자동 연결 툴에서 두 타겟 영역이 이 거리 이내에 있으면 연결 후보로 판단한다.")]
-    [SerializeField] private float waterBasinAutoConnectionSearchDistance = 0.1f;
-
-    [Tooltip("에디터 Scene View에서 WaterBasinTarget에 저장된 연결선을 표시한다.")]
-    [SerializeField] private bool showWaterBasinSavedConnectionPreview = true;
-
-    [Tooltip("물 연결선과 자동 연결 후보선을 표시할 기준 범위입니다.")]
-    [InspectorName("Scene View 연결선 표시 범위")]
-    [SerializeField] private WaterBasinConnectionPreviewScope waterBasinConnectionPreviewScope =
-        WaterBasinConnectionPreviewScope.SelectedTargets;
-
-    [Tooltip("표시 범위가 Specific Target일 때 연결선을 표시할 기준 WaterBasinTarget입니다.")]
-    [InspectorName("Scene View 연결선 기준 타겟")]
-    [SerializeField] private WaterBasinTarget waterBasinConnectionPreviewTarget;
-
     public bool ShowDebugOverlay => showDebugOverlay;
     public bool ShowSceneViewGizmos => showSceneViewGizmos;
-    public static bool ShowWaterBasinAutoConnectionPreview { get; private set; } = true;
-    public static float WaterBasinAutoConnectionSearchDistance { get; private set; } = 0.1f;
-    public static bool ShowWaterBasinSavedConnectionPreview { get; private set; } = true;
     public static WaterBasinDebugOverlayScope WaterBasinOverlayScope { get; private set; } =
         WaterBasinDebugOverlayScope.SpecificTarget;
     public static WaterBasinTarget WaterBasinOverlayTarget { get; private set; }
-    public static WaterBasinConnectionPreviewScope WaterBasinPreviewScope { get; private set; } =
-        WaterBasinConnectionPreviewScope.SelectedTargets;
-    public static WaterBasinTarget WaterBasinPreviewTarget { get; private set; }
 
     private bool hasAppliedDebugState;
     private bool lastAppliedOverlay;
@@ -116,11 +80,6 @@ public class GameDebugController : MonoBehaviour
     private bool lastAppliedWaterBasinDebug;
     private WaterBasinDebugOverlayScope lastAppliedWaterBasinDebugOverlayScope;
     private WaterBasinTarget lastAppliedWaterBasinDebugOverlayTarget;
-    private bool lastAppliedWaterBasinAutoConnectionPreview;
-    private float lastAppliedWaterBasinAutoConnectionSearchDistance;
-    private bool lastAppliedWaterBasinSavedConnectionPreview;
-    private WaterBasinConnectionPreviewScope lastAppliedWaterBasinConnectionPreviewScope;
-    private WaterBasinTarget lastAppliedWaterBasinConnectionPreviewTarget;
     private bool lastAppliedPuzzleDebug;
     private bool lastAppliedAnimationDebug;
 
@@ -191,13 +150,6 @@ public class GameDebugController : MonoBehaviour
             lastAppliedWaterBasinDebug != showWaterBasinDebug ||
             lastAppliedWaterBasinDebugOverlayScope != waterBasinDebugOverlayScope ||
             lastAppliedWaterBasinDebugOverlayTarget != waterBasinDebugOverlayTarget ||
-            lastAppliedWaterBasinAutoConnectionPreview != showWaterBasinAutoConnectionPreview ||
-            !Mathf.Approximately(
-                lastAppliedWaterBasinAutoConnectionSearchDistance,
-                waterBasinAutoConnectionSearchDistance) ||
-            lastAppliedWaterBasinSavedConnectionPreview != showWaterBasinSavedConnectionPreview ||
-            lastAppliedWaterBasinConnectionPreviewScope != waterBasinConnectionPreviewScope ||
-            lastAppliedWaterBasinConnectionPreviewTarget != waterBasinConnectionPreviewTarget ||
             lastAppliedPuzzleDebug != showPuzzleDebug ||
             lastAppliedAnimationDebug != showAnimationDebug)
         {
@@ -218,13 +170,6 @@ public class GameDebugController : MonoBehaviour
             lastAppliedWaterBasinDebug == showWaterBasinDebug &&
             lastAppliedWaterBasinDebugOverlayScope == waterBasinDebugOverlayScope &&
             lastAppliedWaterBasinDebugOverlayTarget == waterBasinDebugOverlayTarget &&
-            lastAppliedWaterBasinAutoConnectionPreview == showWaterBasinAutoConnectionPreview &&
-            Mathf.Approximately(
-                lastAppliedWaterBasinAutoConnectionSearchDistance,
-                waterBasinAutoConnectionSearchDistance) &&
-            lastAppliedWaterBasinSavedConnectionPreview == showWaterBasinSavedConnectionPreview &&
-            lastAppliedWaterBasinConnectionPreviewScope == waterBasinConnectionPreviewScope &&
-            lastAppliedWaterBasinConnectionPreviewTarget == waterBasinConnectionPreviewTarget &&
             lastAppliedPuzzleDebug == showPuzzleDebug &&
             lastAppliedAnimationDebug == showAnimationDebug)
         {
@@ -236,8 +181,6 @@ public class GameDebugController : MonoBehaviour
             RefreshUmbrellaControllers();
         }
 
-        waterBasinAutoConnectionSearchDistance = Mathf.Max(0.0f, waterBasinAutoConnectionSearchDistance);
-
         ApplyUmbrellaDebugState();
         ApplyAnimationDebugState();
         UmbrellaWaterTarget.SetDebugOverlayEnabled(showDebugOverlay && showWaterTargetDebug);
@@ -247,13 +190,6 @@ public class GameDebugController : MonoBehaviour
         WaterBasinTarget.SetDebugOverlayFilter(waterBasinDebugOverlayScope, waterBasinDebugOverlayTarget);
         WaterBasinOverlayScope = waterBasinDebugOverlayScope;
         WaterBasinOverlayTarget = waterBasinDebugOverlayTarget;
-        ShowWaterBasinAutoConnectionPreview =
-            showSceneViewGizmos && showWaterBasinDebug && showWaterBasinAutoConnectionPreview;
-        WaterBasinAutoConnectionSearchDistance = waterBasinAutoConnectionSearchDistance;
-        ShowWaterBasinSavedConnectionPreview =
-            showSceneViewGizmos && showWaterBasinDebug && showWaterBasinSavedConnectionPreview;
-        WaterBasinPreviewScope = waterBasinConnectionPreviewScope;
-        WaterBasinPreviewTarget = waterBasinConnectionPreviewTarget;
         PuzzleDebugOverlay.SetVisible(
             showDebugOverlay && showPuzzleDebug,
             showSceneViewGizmos && showPuzzleDebug);
@@ -266,11 +202,6 @@ public class GameDebugController : MonoBehaviour
         lastAppliedWaterBasinDebug = showWaterBasinDebug;
         lastAppliedWaterBasinDebugOverlayScope = waterBasinDebugOverlayScope;
         lastAppliedWaterBasinDebugOverlayTarget = waterBasinDebugOverlayTarget;
-        lastAppliedWaterBasinAutoConnectionPreview = showWaterBasinAutoConnectionPreview;
-        lastAppliedWaterBasinAutoConnectionSearchDistance = waterBasinAutoConnectionSearchDistance;
-        lastAppliedWaterBasinSavedConnectionPreview = showWaterBasinSavedConnectionPreview;
-        lastAppliedWaterBasinConnectionPreviewScope = waterBasinConnectionPreviewScope;
-        lastAppliedWaterBasinConnectionPreviewTarget = waterBasinConnectionPreviewTarget;
         lastAppliedPuzzleDebug = showPuzzleDebug;
         lastAppliedAnimationDebug = showAnimationDebug;
 

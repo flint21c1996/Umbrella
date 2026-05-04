@@ -65,21 +65,19 @@ internal static class WaterBasinTargetSceneDebugDrawer
 
     private static void DrawWaterBasinConnections(SceneView sceneView)
     {
+        if (Application.isPlaying)
+        {
+            return;
+        }
+
         WaterBasinTarget[] sources = GetPreviewSources();
         if (sources.Length == 0)
         {
             return;
         }
 
-        if (GameDebugController.ShowWaterBasinAutoConnectionPreview)
-        {
-            DrawAutoConnectionPreview(sources);
-        }
-
-        if (GameDebugController.ShowWaterBasinSavedConnectionPreview)
-        {
-            DrawSavedConnections(sources);
-        }
+        DrawAutoConnectionPreview(sources);
+        DrawSavedConnections(sources);
     }
 
     private static void DrawAutoConnectionPreview(WaterBasinTarget[] sources)
@@ -133,17 +131,7 @@ internal static class WaterBasinTargetSceneDebugDrawer
 
     private static WaterBasinTarget[] GetPreviewSources()
     {
-        switch (GameDebugController.WaterBasinPreviewScope)
-        {
-            case GameDebugController.WaterBasinConnectionPreviewScope.SpecificTarget:
-                return GameDebugController.WaterBasinPreviewTarget != null
-                    ? new[] { GameDebugController.WaterBasinPreviewTarget }
-                    : new WaterBasinTarget[0];
-            case GameDebugController.WaterBasinConnectionPreviewScope.AllTargets:
-                return UnityEngine.Object.FindObjectsByType<WaterBasinTarget>();
-            default:
-                return GetSelectedTargets();
-        }
+        return GetSelectedTargets();
     }
 
     private static WaterBasinTarget[] GetSelectedTargets()
@@ -173,6 +161,7 @@ internal static class WaterBasinTargetSceneDebugDrawer
 
 internal static class WaterBasinTargetEditorConnectionTool
 {
+    public const float AutoConnectionSearchDistance = 0.1f;
     private const string UndoName = "물 연결 편집";
 
     [MenuItem("Tools/Water Basin/선택 대상 자동 연결 추가")]
@@ -259,7 +248,7 @@ internal static class WaterBasinTargetEditorConnectionTool
         Bounds firstBounds = new Bounds(first.VolumeWorldCenter, first.VolumeWorldSize);
         Bounds secondBounds = new Bounds(second.VolumeWorldCenter, second.VolumeWorldSize);
         return GetBoundsDistance(firstBounds, secondBounds)
-            <= GameDebugController.WaterBasinAutoConnectionSearchDistance;
+            <= AutoConnectionSearchDistance;
     }
 
     public static void ClearConnectionsWithConfirm(WaterBasinTarget[] targets)
