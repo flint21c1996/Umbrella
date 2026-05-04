@@ -101,6 +101,12 @@ public class WaterBasinTarget : MonoBehaviour
     [SerializeField] private bool drawSurfaceGizmo = true;
     [SerializeField] private bool showGameViewDebug = true;
     [SerializeField] private bool showGroupDebug = true;
+    [Tooltip("런타임 Game View 디버그 라벨과 함께 연결된 WaterBasinTarget 방향의 선을 표시합니다.")]
+    [SerializeField] private bool showConnectedTargetLines = true;
+    [Tooltip("런타임 Game View에서 연결된 WaterBasinTarget 선을 그릴 때 사용할 색상입니다.")]
+    [SerializeField] private Color connectedTargetLineColor = new Color(0.1f, 0.75f, 1.0f, 0.85f);
+    [Tooltip("런타임 Game View에서 연결된 WaterBasinTarget 선을 그릴 때 사용할 두께입니다.")]
+    [SerializeField] private float connectedTargetLineThickness = 2.0f;
     [SerializeField] private Vector3 labelOffset = new Vector3(0.0f, 1.25f, 0.0f);
     [SerializeField] private Vector2 labelSize = new Vector2(240.0f, 148.0f);
     [SerializeField] private Color debugColor = new Color(0.1f, 0.45f, 1.0f, 0.35f);
@@ -185,6 +191,7 @@ public class WaterBasinTarget : MonoBehaviour
         labelSize = new Vector2(
             Mathf.Max(160.0f, labelSize.x),
             Mathf.Max(148.0f, labelSize.y));
+        connectedTargetLineThickness = Mathf.Max(0.5f, connectedTargetLineThickness);
 
         if (bottomHeightMode == BottomHeightMode.TransformY)
         {
@@ -954,6 +961,8 @@ public class WaterBasinTarget : MonoBehaviour
             return;
         }
 
+        DrawSingleTargetConnectionLines(targetCamera);
+
         Vector3 labelWorldPosition = transform.position + labelOffset;
         Vector3 screenPoint = targetCamera.WorldToScreenPoint(labelWorldPosition);
         if (screenPoint.z <= 0.0f)
@@ -991,6 +1000,8 @@ public class WaterBasinTarget : MonoBehaviour
         {
             return;
         }
+
+        DrawConnectedGroupConnectionLines(targetCamera, group);
 
         float totalVolume = 0.0f;
         float totalCapacity = 0.0f;
@@ -1050,6 +1061,126 @@ public class WaterBasinTarget : MonoBehaviour
         GUI.Label(new Rect(x + 8.0f, y + 74.0f, groupLabelSize.x - 16.0f, 18.0f), $"Bottom/Top: {minBottomY:F2} / {maxTopY:F2}  Area: {totalArea:F2}");
         GUI.Label(new Rect(x + 8.0f, y + 92.0f, groupLabelSize.x - 16.0f, 18.0f), $"Bounds: {groupBounds.size.x:F2},{groupBounds.size.y:F2},{groupBounds.size.z:F2}");
         GUI.Label(new Rect(x + 8.0f, y + 110.0f, groupLabelSize.x - 16.0f, 18.0f), $"Center: {groupBounds.center.x:F2},{groupBounds.center.y:F2},{groupBounds.center.z:F2}");
+    }
+
+    private void DrawSingleTargetConnectionLines(Camera targetCamera)
+    {
+        if (!showConnectedTargetLines)
+        {
+            return;
+        }
+
+        List<WaterBasinTarget> connectedTargets = CollectDirectConnectedDebugTargets();
+        for (int i = 0; i < connectedTargets.Count; i++)
+        {
+            DrawConnectionLine(targetCamera, this, connectedTargets[i]);
+        }
+    }
+
+    private void DrawConnectedGroupConnectionLines(Camera targetCamera, List<WaterBasinTarget> group)
+    {
+        if (!showConnectedTargetLines || group == null || group.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<WaterBasinTarget> groupSet = new HashSet<WaterBasinTarget>(group);
+        WaterBasinTarget[] allTargets = FindObjectsByType<WaterBasinTarget>();
+        for (int i = 0; i < group.Count; i++)
+        {
+            WaterBasinTarget source = group[i];
+            if (source == null)
+            {
+                continue;
+            }
+
+            List<WaterBasinTarget> targets = source.CollectDirectConnectedDebugTargets(allTargets);
+            for (int targetIndex = 0; targetIndex < targets.Count; targetIndex++)
+            {
+                WaterBasinTarget target = targets[targetIndex];
+                if (target == null || !groupSet.Contains(target))
+                {
+                    continue;
+                }
+
+                int targetGroupIndex = group.IndexOf(target);
+                if (targetGroupIndex < 0 || i >= targetGroupIndex)
+                {
+                    continue;
+                }
+
+                DrawConnectionLine(targetCamera, source, target);
+            }
+        }
+    }
+
+    private List<WaterBasinTarget> CollectDirectConnectedDebugTargets()
+    {
+        return CollectDirectConnectedDebugTargets(FindObjectsByType<WaterBasinTarget>());
+    }
+
+    private List<WaterBasinTarget> CollectDirectConnectedDebugTargets(WaterBasinTarget[] allTargets)
+    {
+        List<WaterBasinTarget> result = new List<WaterBasinTarget>();
+        HashSet<WaterBasinTarget> resultSet = new HashSet<WaterBasinTarget>();
+
+        AddDebugConnectionTargets(connectedTargets, result, resultSet);
+
+        for (int i = 0; i < allTargets.Length; i++)
+        {
+            WaterBasinTarget candidate = allTargets[i];
+            if (candidate == null || candidate == this)
+            {
+                continue;
+            }
+
+            if (candidate.HasManualConnectionTo(this))
+            {
+                AddDebugConnectionTarget(candidate, result, resultSet);
+            }
+        }
+
+        return result;
+    }
+
+    private static void AddDebugConnectionTargets(
+        List<WaterBasinTarget> targets,
+        List<WaterBasinTarget> result,
+        HashSet<WaterBasinTarget> resultSet)
+    {
+        for (int i = 0; i < targets.Count; i++)
+        {
+            AddDebugConnectionTarget(targets[i], result, resultSet);
+        }
+    }
+
+    private static void AddDebugConnectionTarget(
+        WaterBasinTarget target,
+        List<WaterBasinTarget> result,
+        HashSet<WaterBasinTarget> resultSet)
+    {
+        if (target == null || !target.isActiveAndEnabled || resultSet.Contains(target))
+        {
+            return;
+        }
+
+        resultSet.Add(target);
+        result.Add(target);
+    }
+
+    private void DrawConnectionLine(Camera targetCamera, WaterBasinTarget source, WaterBasinTarget target)
+    {
+        if (source == null || target == null)
+        {
+            return;
+        }
+
+        PuzzleDebugOverlay.DrawWorldLine(
+            targetCamera,
+            source.VolumeWorldCenter,
+            target.VolumeWorldCenter,
+            connectedTargetLineColor,
+            connectedTargetLineThickness);
     }
 
     private void RefreshConnectedGroupDebugState()
