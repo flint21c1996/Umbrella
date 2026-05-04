@@ -988,28 +988,60 @@ public class WaterBasinTarget : MonoBehaviour
         selectedDebugGroupTargets.Clear();
         selectedDebugGroupCacheBuilt = false;
 
-        GameObject[] selectedGameObjects = UnityEditor.Selection.gameObjects;
-        for (int i = 0; i < selectedGameObjects.Length; i++)
+        UnityEngine.Object[] selectedObjects = UnityEditor.Selection.objects;
+        for (int i = 0; i < selectedObjects.Length; i++)
         {
-            GameObject selectedGameObject = selectedGameObjects[i];
-            if (selectedGameObject == null)
-            {
-                continue;
-            }
+            AddSelectedObjectDebugTargets(selectedObjects[i]);
+        }
+    }
 
-            WaterBasinTarget parentTarget = selectedGameObject.GetComponentInParent<WaterBasinTarget>();
-            if (parentTarget != null)
-            {
-                selectedDebugTargets.Add(parentTarget);
-            }
+    private static void AddSelectedObjectDebugTargets(UnityEngine.Object selectedObject)
+    {
+        if (selectedObject == null)
+        {
+            return;
+        }
 
-            WaterBasinTarget[] childTargets = selectedGameObject.GetComponentsInChildren<WaterBasinTarget>(true);
-            for (int childIndex = 0; childIndex < childTargets.Length; childIndex++)
+        WaterBasinTarget selectedTarget = selectedObject as WaterBasinTarget;
+        if (selectedTarget != null)
+        {
+            selectedDebugTargets.Add(selectedTarget);
+            return;
+        }
+
+        Component selectedComponent = selectedObject as Component;
+        if (selectedComponent != null)
+        {
+            AddGameObjectDebugTargets(selectedComponent.gameObject);
+            return;
+        }
+
+        GameObject selectedGameObject = selectedObject as GameObject;
+        if (selectedGameObject != null)
+        {
+            AddGameObjectDebugTargets(selectedGameObject);
+        }
+    }
+
+    private static void AddGameObjectDebugTargets(GameObject selectedGameObject)
+    {
+        if (selectedGameObject == null)
+        {
+            return;
+        }
+
+        WaterBasinTarget parentTarget = selectedGameObject.GetComponentInParent<WaterBasinTarget>(true);
+        if (parentTarget != null)
+        {
+            selectedDebugTargets.Add(parentTarget);
+        }
+
+        WaterBasinTarget[] childTargets = selectedGameObject.GetComponentsInChildren<WaterBasinTarget>(true);
+        for (int childIndex = 0; childIndex < childTargets.Length; childIndex++)
+        {
+            if (childTargets[childIndex] != null)
             {
-                if (childTargets[childIndex] != null)
-                {
-                    selectedDebugTargets.Add(childTargets[childIndex]);
-                }
+                selectedDebugTargets.Add(childTargets[childIndex]);
             }
         }
     }

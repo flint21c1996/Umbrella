@@ -64,10 +64,12 @@ public class GameDebugController : MonoBehaviour
     [Header("Water")]
     [SerializeField] private bool showWaterBasinDebug = true;
 
+    [InspectorName("Game View 라벨 표시 범위")]
     [Tooltip("Game View에서 WaterBasinTarget 디버그 라벨을 표시할 범위입니다.")]
     [SerializeField] private WaterBasinDebugOverlayScope waterBasinDebugOverlayScope =
         WaterBasinDebugOverlayScope.SelectedTargets;
 
+    [InspectorName("Game View 라벨 기준 타겟")]
     [Tooltip("표시 범위가 Specific Target 또는 Specific Connected Group일 때 기준으로 사용할 WaterBasinTarget입니다.")]
     [SerializeField] private WaterBasinTarget waterBasinDebugOverlayTarget;
 
@@ -81,10 +83,12 @@ public class GameDebugController : MonoBehaviour
     [SerializeField] private bool showWaterBasinSavedConnectionPreview = true;
 
     [Tooltip("물 연결선과 자동 연결 후보선을 표시할 기준 범위입니다.")]
+    [InspectorName("Scene View 연결선 표시 범위")]
     [SerializeField] private WaterBasinConnectionPreviewScope waterBasinConnectionPreviewScope =
         WaterBasinConnectionPreviewScope.SelectedTargets;
 
     [Tooltip("표시 범위가 Specific Target일 때 연결선을 표시할 기준 WaterBasinTarget입니다.")]
+    [InspectorName("Scene View 연결선 기준 타겟")]
     [SerializeField] private WaterBasinTarget waterBasinConnectionPreviewTarget;
 
     public bool ShowDebugOverlay => showDebugOverlay;
