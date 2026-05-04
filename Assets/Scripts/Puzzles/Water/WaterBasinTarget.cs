@@ -8,6 +8,16 @@ public class WaterBasinTarget : MonoBehaviour
     private const float Epsilon = 0.0001f;
     private static bool debugOverlayEnabled = true;
     private static bool debugGizmosEnabled = true;
+    private static GameDebugController.WaterBasinDebugOverlayScope debugOverlayScope =
+        GameDebugController.WaterBasinDebugOverlayScope.SelectedTargets;
+    private static WaterBasinTarget debugOverlayTarget;
+
+#if UNITY_EDITOR
+    private static int debugSelectionCacheFrame = -1;
+    private static readonly HashSet<WaterBasinTarget> selectedDebugTargets = new HashSet<WaterBasinTarget>();
+    private static readonly HashSet<WaterBasinTarget> selectedDebugGroupTargets = new HashSet<WaterBasinTarget>();
+    private static bool selectedDebugGroupCacheBuilt;
+#endif
 
     private enum BottomHeightMode
     {
@@ -130,6 +140,14 @@ public class WaterBasinTarget : MonoBehaviour
     {
         debugOverlayEnabled = showOverlay;
         debugGizmosEnabled = showGizmos;
+    }
+
+    public static void SetDebugOverlayFilter(
+        GameDebugController.WaterBasinDebugOverlayScope scope,
+        WaterBasinTarget target)
+    {
+        debugOverlayScope = scope;
+        debugOverlayTarget = target;
     }
 
     private void Reset()
@@ -911,9 +929,133 @@ public class WaterBasinTarget : MonoBehaviour
 
     }
 
+    private bool ShouldDrawGameViewDebug()
+    {
+        switch (debugOverlayScope)
+        {
+            case GameDebugController.WaterBasinDebugOverlayScope.AllTargets:
+                return true;
+            case GameDebugController.WaterBasinDebugOverlayScope.SpecificTarget:
+                return debugOverlayTarget == this;
+            case GameDebugController.WaterBasinDebugOverlayScope.SpecificConnectedGroup:
+                return IsInDebugConnectedGroup(debugOverlayTarget);
+            case GameDebugController.WaterBasinDebugOverlayScope.SelectedConnectedGroup:
+                return IsInSelectedDebugConnectedGroup();
+            default:
+                return IsSelectedForDebug();
+        }
+    }
+
+    private bool IsInDebugConnectedGroup(WaterBasinTarget groupRoot)
+    {
+        if (groupRoot == null)
+        {
+            return false;
+        }
+
+        if (groupRoot == this)
+        {
+            return true;
+        }
+
+        List<WaterBasinTarget> group = groupRoot.CollectConnectedGroup();
+        return group.Contains(this);
+    }
+
+#if UNITY_EDITOR
+    private bool IsSelectedForDebug()
+    {
+        RefreshSelectedDebugTargets();
+        return selectedDebugTargets.Contains(this);
+    }
+
+    private bool IsInSelectedDebugConnectedGroup()
+    {
+        RefreshSelectedDebugTargets();
+        BuildSelectedDebugGroupTargets();
+        return selectedDebugGroupTargets.Contains(this);
+    }
+
+    private static void RefreshSelectedDebugTargets()
+    {
+        if (debugSelectionCacheFrame == Time.frameCount)
+        {
+            return;
+        }
+
+        debugSelectionCacheFrame = Time.frameCount;
+        selectedDebugTargets.Clear();
+        selectedDebugGroupTargets.Clear();
+        selectedDebugGroupCacheBuilt = false;
+
+        GameObject[] selectedGameObjects = UnityEditor.Selection.gameObjects;
+        for (int i = 0; i < selectedGameObjects.Length; i++)
+        {
+            GameObject selectedGameObject = selectedGameObjects[i];
+            if (selectedGameObject == null)
+            {
+                continue;
+            }
+
+            WaterBasinTarget parentTarget = selectedGameObject.GetComponentInParent<WaterBasinTarget>();
+            if (parentTarget != null)
+            {
+                selectedDebugTargets.Add(parentTarget);
+            }
+
+            WaterBasinTarget[] childTargets = selectedGameObject.GetComponentsInChildren<WaterBasinTarget>(true);
+            for (int childIndex = 0; childIndex < childTargets.Length; childIndex++)
+            {
+                if (childTargets[childIndex] != null)
+                {
+                    selectedDebugTargets.Add(childTargets[childIndex]);
+                }
+            }
+        }
+    }
+
+    private static void BuildSelectedDebugGroupTargets()
+    {
+        if (selectedDebugGroupCacheBuilt)
+        {
+            return;
+        }
+
+        selectedDebugGroupCacheBuilt = true;
+        selectedDebugGroupTargets.Clear();
+
+        foreach (WaterBasinTarget selectedTarget in selectedDebugTargets)
+        {
+            if (selectedTarget == null)
+            {
+                continue;
+            }
+
+            List<WaterBasinTarget> group = selectedTarget.CollectConnectedGroup();
+            for (int i = 0; i < group.Count; i++)
+            {
+                if (group[i] != null)
+                {
+                    selectedDebugGroupTargets.Add(group[i]);
+                }
+            }
+        }
+    }
+#else
+    private bool IsSelectedForDebug()
+    {
+        return false;
+    }
+
+    private bool IsInSelectedDebugConnectedGroup()
+    {
+        return false;
+    }
+#endif
+
     private void OnGUI()
     {
-        if (!Application.isPlaying || !debugOverlayEnabled || !showGameViewDebug)
+        if (!Application.isPlaying || !debugOverlayEnabled || !showGameViewDebug || !ShouldDrawGameViewDebug())
         {
             return;
         }
