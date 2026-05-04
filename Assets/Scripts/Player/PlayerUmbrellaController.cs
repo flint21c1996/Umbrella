@@ -439,7 +439,13 @@ public class PlayerUmbrellaController : MonoBehaviour
                 lastPourHitColliderName = hit.collider.name;
 
                 UmbrellaWaterTarget waterTarget = hit.collider.GetComponentInParent<UmbrellaWaterTarget>();
-                if (waterTarget != null)
+                WaterBasinTarget basinTarget = hit.collider.GetComponentInParent<WaterBasinTarget>();
+                if (basinTarget != null)
+                {
+                    lastPourTargetName = basinTarget.name;
+                    basinTarget.AddWater(pourAmount);
+                }
+                else if (waterTarget != null)
                 {
                     lastPourTargetName = waterTarget.name;
                     waterTarget.ReceiveWater(pourAmount);
