@@ -9,15 +9,8 @@ public class WaterBasinTarget : MonoBehaviour
     private static bool debugOverlayEnabled = true;
     private static bool debugGizmosEnabled = true;
     private static GameDebugController.WaterBasinDebugOverlayScope debugOverlayScope =
-        GameDebugController.WaterBasinDebugOverlayScope.SelectedTargets;
+        GameDebugController.WaterBasinDebugOverlayScope.SpecificTarget;
     private static WaterBasinTarget debugOverlayTarget;
-
-#if UNITY_EDITOR
-    private static int debugSelectionCacheFrame = -1;
-    private static readonly HashSet<WaterBasinTarget> selectedDebugTargets = new HashSet<WaterBasinTarget>();
-    private static readonly HashSet<WaterBasinTarget> selectedDebugGroupTargets = new HashSet<WaterBasinTarget>();
-    private static bool selectedDebugGroupCacheBuilt;
-#endif
 
     private enum BottomHeightMode
     {
@@ -933,157 +926,14 @@ public class WaterBasinTarget : MonoBehaviour
     {
         switch (debugOverlayScope)
         {
-            case GameDebugController.WaterBasinDebugOverlayScope.AllTargets:
-                return true;
             case GameDebugController.WaterBasinDebugOverlayScope.SpecificTarget:
                 return debugOverlayTarget == this;
             case GameDebugController.WaterBasinDebugOverlayScope.SpecificConnectedGroup:
-                return IsInDebugConnectedGroup(debugOverlayTarget);
-            case GameDebugController.WaterBasinDebugOverlayScope.SelectedConnectedGroup:
-                return IsInSelectedDebugConnectedGroup();
+                return debugOverlayTarget == this;
             default:
-                return IsSelectedForDebug();
+                return false;
         }
     }
-
-    private bool IsInDebugConnectedGroup(WaterBasinTarget groupRoot)
-    {
-        if (groupRoot == null)
-        {
-            return false;
-        }
-
-        if (groupRoot == this)
-        {
-            return true;
-        }
-
-        List<WaterBasinTarget> group = groupRoot.CollectConnectedGroup();
-        return group.Contains(this);
-    }
-
-#if UNITY_EDITOR
-    private bool IsSelectedForDebug()
-    {
-        RefreshSelectedDebugTargets();
-        return selectedDebugTargets.Contains(this);
-    }
-
-    private bool IsInSelectedDebugConnectedGroup()
-    {
-        RefreshSelectedDebugTargets();
-        BuildSelectedDebugGroupTargets();
-        return selectedDebugGroupTargets.Contains(this);
-    }
-
-    private static void RefreshSelectedDebugTargets()
-    {
-        if (debugSelectionCacheFrame == Time.frameCount)
-        {
-            return;
-        }
-
-        debugSelectionCacheFrame = Time.frameCount;
-        selectedDebugTargets.Clear();
-        selectedDebugGroupTargets.Clear();
-        selectedDebugGroupCacheBuilt = false;
-
-        UnityEngine.Object[] selectedObjects = UnityEditor.Selection.objects;
-        for (int i = 0; i < selectedObjects.Length; i++)
-        {
-            AddSelectedObjectDebugTargets(selectedObjects[i]);
-        }
-    }
-
-    private static void AddSelectedObjectDebugTargets(UnityEngine.Object selectedObject)
-    {
-        if (selectedObject == null)
-        {
-            return;
-        }
-
-        WaterBasinTarget selectedTarget = selectedObject as WaterBasinTarget;
-        if (selectedTarget != null)
-        {
-            selectedDebugTargets.Add(selectedTarget);
-            return;
-        }
-
-        Component selectedComponent = selectedObject as Component;
-        if (selectedComponent != null)
-        {
-            AddGameObjectDebugTargets(selectedComponent.gameObject);
-            return;
-        }
-
-        GameObject selectedGameObject = selectedObject as GameObject;
-        if (selectedGameObject != null)
-        {
-            AddGameObjectDebugTargets(selectedGameObject);
-        }
-    }
-
-    private static void AddGameObjectDebugTargets(GameObject selectedGameObject)
-    {
-        if (selectedGameObject == null)
-        {
-            return;
-        }
-
-        WaterBasinTarget parentTarget = selectedGameObject.GetComponentInParent<WaterBasinTarget>(true);
-        if (parentTarget != null)
-        {
-            selectedDebugTargets.Add(parentTarget);
-        }
-
-        WaterBasinTarget[] childTargets = selectedGameObject.GetComponentsInChildren<WaterBasinTarget>(true);
-        for (int childIndex = 0; childIndex < childTargets.Length; childIndex++)
-        {
-            if (childTargets[childIndex] != null)
-            {
-                selectedDebugTargets.Add(childTargets[childIndex]);
-            }
-        }
-    }
-
-    private static void BuildSelectedDebugGroupTargets()
-    {
-        if (selectedDebugGroupCacheBuilt)
-        {
-            return;
-        }
-
-        selectedDebugGroupCacheBuilt = true;
-        selectedDebugGroupTargets.Clear();
-
-        foreach (WaterBasinTarget selectedTarget in selectedDebugTargets)
-        {
-            if (selectedTarget == null)
-            {
-                continue;
-            }
-
-            List<WaterBasinTarget> group = selectedTarget.CollectConnectedGroup();
-            for (int i = 0; i < group.Count; i++)
-            {
-                if (group[i] != null)
-                {
-                    selectedDebugGroupTargets.Add(group[i]);
-                }
-            }
-        }
-    }
-#else
-    private bool IsSelectedForDebug()
-    {
-        return false;
-    }
-
-    private bool IsInSelectedDebugConnectedGroup()
-    {
-        return false;
-    }
-#endif
 
     private void OnGUI()
     {
@@ -1095,6 +945,12 @@ public class WaterBasinTarget : MonoBehaviour
         Camera targetCamera = Camera.main;
         if (targetCamera == null)
         {
+            return;
+        }
+
+        if (debugOverlayScope == GameDebugController.WaterBasinDebugOverlayScope.SpecificConnectedGroup)
+        {
+            DrawConnectedGroupDebugLabel(targetCamera);
             return;
         }
 
@@ -1126,6 +982,74 @@ public class WaterBasinTarget : MonoBehaviour
         RefreshConnectedGroupDebugState();
         float groupFill = groupCapacity <= Epsilon ? 0.0f : groupVolume / groupCapacity;
         GUI.Label(new Rect(x + 8.0f, y + 128.0f, labelSize.x - 16.0f, 18.0f), $"Group: {groupTargetCount}  {groupVolume:F2}/{groupCapacity:F2}  {groupFill:P0}");
+    }
+
+    private void DrawConnectedGroupDebugLabel(Camera targetCamera)
+    {
+        List<WaterBasinTarget> group = CollectConnectedGroup();
+        if (group.Count == 0)
+        {
+            return;
+        }
+
+        float totalVolume = 0.0f;
+        float totalCapacity = 0.0f;
+        float totalArea = 0.0f;
+        float minBottomY = group[0].BottomWorldY;
+        float maxTopY = group[0].TopWorldY;
+        float minSurfaceY = group[0].waterSurfaceWorldY;
+        float maxSurfaceY = group[0].waterSurfaceWorldY;
+        int totalLinks = 0;
+
+        Bounds groupBounds = new Bounds(group[0].VolumeWorldCenter, group[0].VolumeWorldSize);
+        for (int i = 0; i < group.Count; i++)
+        {
+            WaterBasinTarget target = group[i];
+            totalVolume += target.currentVolume;
+            totalCapacity += target.Capacity;
+            totalArea += target.SurfaceArea;
+            minBottomY = Mathf.Min(minBottomY, target.BottomWorldY);
+            maxTopY = Mathf.Max(maxTopY, target.TopWorldY);
+            minSurfaceY = Mathf.Min(minSurfaceY, target.waterSurfaceWorldY);
+            maxSurfaceY = Mathf.Max(maxSurfaceY, target.waterSurfaceWorldY);
+            totalLinks += target.connectedTargets.Count;
+
+            if (i > 0)
+            {
+                groupBounds.Encapsulate(new Bounds(target.VolumeWorldCenter, target.VolumeWorldSize));
+            }
+        }
+
+        groupVolume = totalVolume;
+        groupCapacity = totalCapacity;
+        groupTargetCount = group.Count;
+        groupSurfaceSpread = maxSurfaceY - minSurfaceY;
+
+        Vector3 labelWorldPosition = groupBounds.center + new Vector3(
+            labelOffset.x,
+            groupBounds.extents.y + labelOffset.y,
+            labelOffset.z);
+        Vector3 screenPoint = targetCamera.WorldToScreenPoint(labelWorldPosition);
+        if (screenPoint.z <= 0.0f)
+        {
+            return;
+        }
+
+        Vector2 groupLabelSize = new Vector2(
+            Mathf.Max(labelSize.x, 280.0f),
+            Mathf.Max(labelSize.y, 148.0f));
+        float x = screenPoint.x - groupLabelSize.x * 0.5f;
+        float y = Screen.height - screenPoint.y - groupLabelSize.y;
+        float groupFill = totalCapacity <= Epsilon ? 0.0f : totalVolume / totalCapacity;
+        float representativeSurfaceY = (minSurfaceY + maxSurfaceY) * 0.5f;
+
+        GUI.Box(new Rect(x, y, groupLabelSize.x, groupLabelSize.y), "Water Basin Group");
+        GUI.Label(new Rect(x + 8.0f, y + 20.0f, groupLabelSize.x - 16.0f, 18.0f), $"Root: {name}  Targets: {group.Count}  Links: {totalLinks}");
+        GUI.Label(new Rect(x + 8.0f, y + 38.0f, groupLabelSize.x - 16.0f, 18.0f), $"Volume: {totalVolume:F2} / {totalCapacity:F2}  Fill: {groupFill:P0}");
+        GUI.Label(new Rect(x + 8.0f, y + 56.0f, groupLabelSize.x - 16.0f, 18.0f), $"SurfaceY: {representativeSurfaceY:F2}  Spread: {groupSurfaceSpread:F4}");
+        GUI.Label(new Rect(x + 8.0f, y + 74.0f, groupLabelSize.x - 16.0f, 18.0f), $"Bottom/Top: {minBottomY:F2} / {maxTopY:F2}  Area: {totalArea:F2}");
+        GUI.Label(new Rect(x + 8.0f, y + 92.0f, groupLabelSize.x - 16.0f, 18.0f), $"Bounds: {groupBounds.size.x:F2},{groupBounds.size.y:F2},{groupBounds.size.z:F2}");
+        GUI.Label(new Rect(x + 8.0f, y + 110.0f, groupLabelSize.x - 16.0f, 18.0f), $"Center: {groupBounds.center.x:F2},{groupBounds.center.y:F2},{groupBounds.center.z:F2}");
     }
 
     private void RefreshConnectedGroupDebugState()

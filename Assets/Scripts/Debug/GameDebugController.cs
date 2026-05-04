@@ -8,18 +8,23 @@ public class GameDebugController : MonoBehaviour
 {
     public enum WaterBasinConnectionPreviewScope
     {
+        // 에디터에서 선택한 WaterBasinTarget을 기준으로 Scene View 연결선만 표시합니다.
         SelectedTargets,
+
+        // 아래 Water Basin Connection Preview Target에 지정한 타겟을 기준으로 Scene View 연결선만 표시합니다.
         SpecificTarget,
+
+        // 씬에 있는 모든 WaterBasinTarget의 Scene View 연결선을 표시합니다.
         AllTargets
     }
 
     public enum WaterBasinDebugOverlayScope
     {
-        SelectedTargets,
-        SelectedConnectedGroup,
-        SpecificTarget,
-        SpecificConnectedGroup,
-        AllTargets
+        // 지정한 WaterBasinTarget 하나의 런타임 물 정보를 Game View에 표시합니다.
+        SpecificTarget = 2,
+
+        // 지정한 WaterBasinTarget이 포함된 연결 그룹의 합산 런타임 정보를 라벨 하나로 표시합니다.
+        SpecificConnectedGroup = 3
     }
 
     [Header("Input")]
@@ -67,7 +72,7 @@ public class GameDebugController : MonoBehaviour
     [InspectorName("Game View 라벨 표시 범위")]
     [Tooltip("Game View에서 WaterBasinTarget 디버그 라벨을 표시할 범위입니다.")]
     [SerializeField] private WaterBasinDebugOverlayScope waterBasinDebugOverlayScope =
-        WaterBasinDebugOverlayScope.SelectedTargets;
+        WaterBasinDebugOverlayScope.SpecificTarget;
 
     [InspectorName("Game View 라벨 기준 타겟")]
     [Tooltip("표시 범위가 Specific Target 또는 Specific Connected Group일 때 기준으로 사용할 WaterBasinTarget입니다.")]
@@ -97,7 +102,7 @@ public class GameDebugController : MonoBehaviour
     public static float WaterBasinAutoConnectionSearchDistance { get; private set; } = 0.1f;
     public static bool ShowWaterBasinSavedConnectionPreview { get; private set; } = true;
     public static WaterBasinDebugOverlayScope WaterBasinOverlayScope { get; private set; } =
-        WaterBasinDebugOverlayScope.SelectedTargets;
+        WaterBasinDebugOverlayScope.SpecificTarget;
     public static WaterBasinTarget WaterBasinOverlayTarget { get; private set; }
     public static WaterBasinConnectionPreviewScope WaterBasinPreviewScope { get; private set; } =
         WaterBasinConnectionPreviewScope.SelectedTargets;
@@ -131,6 +136,7 @@ public class GameDebugController : MonoBehaviour
 
     private void OnValidate()
     {
+        NormalizeWaterBasinDebugOverlayScope();
         ApplyDebugState(true);
     }
 
@@ -201,6 +207,8 @@ public class GameDebugController : MonoBehaviour
 
     private void ApplyDebugState(bool force = false)
     {
+        NormalizeWaterBasinDebugOverlayScope();
+
         if (!force &&
             hasAppliedDebugState &&
             lastAppliedOverlay == showDebugOverlay &&
@@ -269,6 +277,28 @@ public class GameDebugController : MonoBehaviour
 #if UNITY_EDITOR
         UnityEditor.SceneView.RepaintAll();
 #endif
+    }
+
+    private void NormalizeWaterBasinDebugOverlayScope()
+    {
+        int scopeValue = (int)waterBasinDebugOverlayScope;
+        if (scopeValue == 0)
+        {
+            waterBasinDebugOverlayScope = WaterBasinDebugOverlayScope.SpecificTarget;
+            return;
+        }
+
+        if (scopeValue == 1)
+        {
+            waterBasinDebugOverlayScope = WaterBasinDebugOverlayScope.SpecificConnectedGroup;
+            return;
+        }
+
+        if (scopeValue != (int)WaterBasinDebugOverlayScope.SpecificTarget &&
+            scopeValue != (int)WaterBasinDebugOverlayScope.SpecificConnectedGroup)
+        {
+            waterBasinDebugOverlayScope = WaterBasinDebugOverlayScope.SpecificTarget;
+        }
     }
 
     private void RefreshUmbrellaControllers()
