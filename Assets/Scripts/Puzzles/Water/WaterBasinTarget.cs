@@ -8,6 +8,9 @@ public class WaterBasinTarget : MonoBehaviour
     private const float Epsilon = 0.0001f;
     private static bool debugOverlayEnabled = true;
     private static bool debugGizmosEnabled = true;
+    private static GameDebugController.WaterBasinDebugOverlayScope debugOverlayScope =
+        GameDebugController.WaterBasinDebugOverlayScope.SpecificTarget;
+    private static WaterBasinTarget debugOverlayTarget;
 
     private enum BottomHeightMode
     {
@@ -98,6 +101,12 @@ public class WaterBasinTarget : MonoBehaviour
     [SerializeField] private bool drawSurfaceGizmo = true;
     [SerializeField] private bool showGameViewDebug = true;
     [SerializeField] private bool showGroupDebug = true;
+    [Tooltip("런타임 Game View 디버그 라벨과 함께 연결된 WaterBasinTarget 방향의 선을 표시합니다.")]
+    [SerializeField] private bool showConnectedTargetLines = true;
+    [Tooltip("런타임 Game View에서 연결된 WaterBasinTarget 선을 그릴 때 사용할 색상입니다.")]
+    [SerializeField] private Color connectedTargetLineColor = new Color(0.1f, 0.75f, 1.0f, 0.85f);
+    [Tooltip("런타임 Game View에서 연결된 WaterBasinTarget 선을 그릴 때 사용할 두께입니다.")]
+    [SerializeField] private float connectedTargetLineThickness = 2.0f;
     [SerializeField] private Vector3 labelOffset = new Vector3(0.0f, 1.25f, 0.0f);
     [SerializeField] private Vector2 labelSize = new Vector2(240.0f, 148.0f);
     [SerializeField] private Color debugColor = new Color(0.1f, 0.45f, 1.0f, 0.35f);
@@ -130,6 +139,14 @@ public class WaterBasinTarget : MonoBehaviour
     {
         debugOverlayEnabled = showOverlay;
         debugGizmosEnabled = showGizmos;
+    }
+
+    public static void SetDebugOverlayFilter(
+        GameDebugController.WaterBasinDebugOverlayScope scope,
+        WaterBasinTarget target)
+    {
+        debugOverlayScope = scope;
+        debugOverlayTarget = target;
     }
 
     private void Reset()
@@ -174,6 +191,7 @@ public class WaterBasinTarget : MonoBehaviour
         labelSize = new Vector2(
             Mathf.Max(160.0f, labelSize.x),
             Mathf.Max(148.0f, labelSize.y));
+        connectedTargetLineThickness = Mathf.Max(0.5f, connectedTargetLineThickness);
 
         if (bottomHeightMode == BottomHeightMode.TransformY)
         {
@@ -911,9 +929,22 @@ public class WaterBasinTarget : MonoBehaviour
 
     }
 
+    private bool ShouldDrawGameViewDebug()
+    {
+        switch (debugOverlayScope)
+        {
+            case GameDebugController.WaterBasinDebugOverlayScope.SpecificTarget:
+                return debugOverlayTarget == this;
+            case GameDebugController.WaterBasinDebugOverlayScope.SpecificConnectedGroup:
+                return debugOverlayTarget == this;
+            default:
+                return false;
+        }
+    }
+
     private void OnGUI()
     {
-        if (!Application.isPlaying || !debugOverlayEnabled || !showGameViewDebug)
+        if (!Application.isPlaying || !debugOverlayEnabled || !showGameViewDebug || !ShouldDrawGameViewDebug())
         {
             return;
         }
@@ -923,6 +954,14 @@ public class WaterBasinTarget : MonoBehaviour
         {
             return;
         }
+
+        if (debugOverlayScope == GameDebugController.WaterBasinDebugOverlayScope.SpecificConnectedGroup)
+        {
+            DrawConnectedGroupDebugLabel(targetCamera);
+            return;
+        }
+
+        DrawSingleTargetConnectionLines(targetCamera);
 
         Vector3 labelWorldPosition = transform.position + labelOffset;
         Vector3 screenPoint = targetCamera.WorldToScreenPoint(labelWorldPosition);
@@ -952,6 +991,196 @@ public class WaterBasinTarget : MonoBehaviour
         RefreshConnectedGroupDebugState();
         float groupFill = groupCapacity <= Epsilon ? 0.0f : groupVolume / groupCapacity;
         GUI.Label(new Rect(x + 8.0f, y + 128.0f, labelSize.x - 16.0f, 18.0f), $"Group: {groupTargetCount}  {groupVolume:F2}/{groupCapacity:F2}  {groupFill:P0}");
+    }
+
+    private void DrawConnectedGroupDebugLabel(Camera targetCamera)
+    {
+        List<WaterBasinTarget> group = CollectConnectedGroup();
+        if (group.Count == 0)
+        {
+            return;
+        }
+
+        DrawConnectedGroupConnectionLines(targetCamera, group);
+
+        float totalVolume = 0.0f;
+        float totalCapacity = 0.0f;
+        float totalArea = 0.0f;
+        float minBottomY = group[0].BottomWorldY;
+        float maxTopY = group[0].TopWorldY;
+        float minSurfaceY = group[0].waterSurfaceWorldY;
+        float maxSurfaceY = group[0].waterSurfaceWorldY;
+        int totalLinks = 0;
+
+        Bounds groupBounds = new Bounds(group[0].VolumeWorldCenter, group[0].VolumeWorldSize);
+        for (int i = 0; i < group.Count; i++)
+        {
+            WaterBasinTarget target = group[i];
+            totalVolume += target.currentVolume;
+            totalCapacity += target.Capacity;
+            totalArea += target.SurfaceArea;
+            minBottomY = Mathf.Min(minBottomY, target.BottomWorldY);
+            maxTopY = Mathf.Max(maxTopY, target.TopWorldY);
+            minSurfaceY = Mathf.Min(minSurfaceY, target.waterSurfaceWorldY);
+            maxSurfaceY = Mathf.Max(maxSurfaceY, target.waterSurfaceWorldY);
+            totalLinks += target.connectedTargets.Count;
+
+            if (i > 0)
+            {
+                groupBounds.Encapsulate(new Bounds(target.VolumeWorldCenter, target.VolumeWorldSize));
+            }
+        }
+
+        groupVolume = totalVolume;
+        groupCapacity = totalCapacity;
+        groupTargetCount = group.Count;
+        groupSurfaceSpread = maxSurfaceY - minSurfaceY;
+
+        Vector3 labelWorldPosition = groupBounds.center + new Vector3(
+            labelOffset.x,
+            groupBounds.extents.y + labelOffset.y,
+            labelOffset.z);
+        Vector3 screenPoint = targetCamera.WorldToScreenPoint(labelWorldPosition);
+        if (screenPoint.z <= 0.0f)
+        {
+            return;
+        }
+
+        Vector2 groupLabelSize = new Vector2(
+            Mathf.Max(labelSize.x, 280.0f),
+            Mathf.Max(labelSize.y, 148.0f));
+        float x = screenPoint.x - groupLabelSize.x * 0.5f;
+        float y = Screen.height - screenPoint.y - groupLabelSize.y;
+        float groupFill = totalCapacity <= Epsilon ? 0.0f : totalVolume / totalCapacity;
+        float representativeSurfaceY = (minSurfaceY + maxSurfaceY) * 0.5f;
+
+        GUI.Box(new Rect(x, y, groupLabelSize.x, groupLabelSize.y), "Water Basin Group");
+        GUI.Label(new Rect(x + 8.0f, y + 20.0f, groupLabelSize.x - 16.0f, 18.0f), $"Root: {name}  Targets: {group.Count}  Links: {totalLinks}");
+        GUI.Label(new Rect(x + 8.0f, y + 38.0f, groupLabelSize.x - 16.0f, 18.0f), $"Volume: {totalVolume:F2} / {totalCapacity:F2}  Fill: {groupFill:P0}");
+        GUI.Label(new Rect(x + 8.0f, y + 56.0f, groupLabelSize.x - 16.0f, 18.0f), $"SurfaceY: {representativeSurfaceY:F2}  Spread: {groupSurfaceSpread:F4}");
+        GUI.Label(new Rect(x + 8.0f, y + 74.0f, groupLabelSize.x - 16.0f, 18.0f), $"Bottom/Top: {minBottomY:F2} / {maxTopY:F2}  Area: {totalArea:F2}");
+        GUI.Label(new Rect(x + 8.0f, y + 92.0f, groupLabelSize.x - 16.0f, 18.0f), $"Bounds: {groupBounds.size.x:F2},{groupBounds.size.y:F2},{groupBounds.size.z:F2}");
+        GUI.Label(new Rect(x + 8.0f, y + 110.0f, groupLabelSize.x - 16.0f, 18.0f), $"Center: {groupBounds.center.x:F2},{groupBounds.center.y:F2},{groupBounds.center.z:F2}");
+    }
+
+    private void DrawSingleTargetConnectionLines(Camera targetCamera)
+    {
+        if (!showConnectedTargetLines)
+        {
+            return;
+        }
+
+        List<WaterBasinTarget> connectedTargets = CollectDirectConnectedDebugTargets();
+        for (int i = 0; i < connectedTargets.Count; i++)
+        {
+            DrawConnectionLine(targetCamera, this, connectedTargets[i]);
+        }
+    }
+
+    private void DrawConnectedGroupConnectionLines(Camera targetCamera, List<WaterBasinTarget> group)
+    {
+        if (!showConnectedTargetLines || group == null || group.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<WaterBasinTarget> groupSet = new HashSet<WaterBasinTarget>(group);
+        WaterBasinTarget[] allTargets = FindObjectsByType<WaterBasinTarget>();
+        for (int i = 0; i < group.Count; i++)
+        {
+            WaterBasinTarget source = group[i];
+            if (source == null)
+            {
+                continue;
+            }
+
+            List<WaterBasinTarget> targets = source.CollectDirectConnectedDebugTargets(allTargets);
+            for (int targetIndex = 0; targetIndex < targets.Count; targetIndex++)
+            {
+                WaterBasinTarget target = targets[targetIndex];
+                if (target == null || !groupSet.Contains(target))
+                {
+                    continue;
+                }
+
+                int targetGroupIndex = group.IndexOf(target);
+                if (targetGroupIndex < 0 || i >= targetGroupIndex)
+                {
+                    continue;
+                }
+
+                DrawConnectionLine(targetCamera, source, target);
+            }
+        }
+    }
+
+    private List<WaterBasinTarget> CollectDirectConnectedDebugTargets()
+    {
+        return CollectDirectConnectedDebugTargets(FindObjectsByType<WaterBasinTarget>());
+    }
+
+    private List<WaterBasinTarget> CollectDirectConnectedDebugTargets(WaterBasinTarget[] allTargets)
+    {
+        List<WaterBasinTarget> result = new List<WaterBasinTarget>();
+        HashSet<WaterBasinTarget> resultSet = new HashSet<WaterBasinTarget>();
+
+        AddDebugConnectionTargets(connectedTargets, result, resultSet);
+
+        for (int i = 0; i < allTargets.Length; i++)
+        {
+            WaterBasinTarget candidate = allTargets[i];
+            if (candidate == null || candidate == this)
+            {
+                continue;
+            }
+
+            if (candidate.HasManualConnectionTo(this))
+            {
+                AddDebugConnectionTarget(candidate, result, resultSet);
+            }
+        }
+
+        return result;
+    }
+
+    private static void AddDebugConnectionTargets(
+        List<WaterBasinTarget> targets,
+        List<WaterBasinTarget> result,
+        HashSet<WaterBasinTarget> resultSet)
+    {
+        for (int i = 0; i < targets.Count; i++)
+        {
+            AddDebugConnectionTarget(targets[i], result, resultSet);
+        }
+    }
+
+    private static void AddDebugConnectionTarget(
+        WaterBasinTarget target,
+        List<WaterBasinTarget> result,
+        HashSet<WaterBasinTarget> resultSet)
+    {
+        if (target == null || !target.isActiveAndEnabled || resultSet.Contains(target))
+        {
+            return;
+        }
+
+        resultSet.Add(target);
+        result.Add(target);
+    }
+
+    private void DrawConnectionLine(Camera targetCamera, WaterBasinTarget source, WaterBasinTarget target)
+    {
+        if (source == null || target == null)
+        {
+            return;
+        }
+
+        PuzzleDebugOverlay.DrawWorldLine(
+            targetCamera,
+            source.VolumeWorldCenter,
+            target.VolumeWorldCenter,
+            connectedTargetLineColor,
+            connectedTargetLineThickness);
     }
 
     private void RefreshConnectedGroupDebugState()
