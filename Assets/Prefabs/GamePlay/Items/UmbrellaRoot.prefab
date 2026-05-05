@@ -11,6 +11,8 @@ GameObject:
   - component: {fileID: 7854585633055205411}
   - component: {fileID: 945394389695151726}
   - component: {fileID: 2831021573108649637}
+  - component: {fileID: 5508365504922568002}
+  - component: {fileID: 1288810431745823953}
   m_Layer: 0
   m_Name: UmbrellaRoot
   m_TagString: Untagged
@@ -70,6 +72,56 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 1, y: 1, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!114 &5508365504922568002
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4365297530307542089}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a7a3a76f6769469b9f8bb4d0b63745b9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UmbrellaPuzzle.Weather.UmbrellaRainSplashController
+  umbrellaController: {fileID: 0}
+  rainBlocker: {fileID: 0}
+  useRainBlockerAsOrigin: 1
+  syncAreaFromRainBlocker: 1
+  splashOrigin: {fileID: 0}
+  splashAreaSize: {x: 1.6, y: 1.6}
+  localEmitterOffset: {x: 0, y: 0.08, z: 0}
+  blockedRainSplashIntensity: 0.65
+  maxEmissionRate: 260
+  blockedRainGraceTime: 0.12
+  fadeOutSpeed: 5
+  upwardSpeedRange: {x: 0.4, y: 1.4}
+  horizontalSpread: 0.75
+  lifetime: 0.35
+  gravityModifierRange: {x: 0.3, y: 1}
+  splashMaterial: {fileID: 0}
+  splashColor: {r: 0.72, g: 0.86, b: 1, a: 0.62}
+  particleSize: 0.075
+  currentIntensity: 0
+--- !u!114 &1288810431745823953
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4365297530307542089}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c22ad8ea570d47168f0f74a6528fb2a0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UmbrellaPuzzle.Weather.UmbrellaRainBlocker
+  umbrellaController: {fileID: 0}
+  blockerParent: {fileID: 0}
+  blockerLayerName: RainBlocker
+  fallbackLayer: 0
+  localOffset: {x: 0, y: 0.08, z: 0}
+  blockerSize: {x: 1.8, y: 0.08, z: 1.8}
+  drawGizmo: 1
 --- !u!1 &7549260793937760649
 GameObject:
   m_ObjectHideFlags: 0

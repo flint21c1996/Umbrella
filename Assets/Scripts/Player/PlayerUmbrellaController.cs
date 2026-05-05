@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.Controls;
@@ -86,6 +87,10 @@ public class PlayerUmbrellaController : MonoBehaviour
     public bool IsUpsideDown => hasUmbrella && currentState == UmbrellaState.UpsideDown;
     public bool IsPouring => hasUmbrella && currentState == UmbrellaState.Pouring;
     public bool CanCollectWater => hasUmbrella && currentState == UmbrellaState.UpsideDown;
+
+    // 우산이 열린 상태에서 RainArea의 비를 막았을 때 발생한다.
+    // amount는 RainArea가 이번 프레임에 전달한 비 노출량이며, 시각 효과 강도 계산에 사용할 수 있다.
+    public event Action<float> RainBlocked;
 
     private void Start()
     {
@@ -255,6 +260,7 @@ public class PlayerUmbrellaController : MonoBehaviour
 
         if (IsOpen)
         {
+            RainBlocked?.Invoke(amount);
             return;
         }
 
@@ -439,7 +445,13 @@ public class PlayerUmbrellaController : MonoBehaviour
                 lastPourHitColliderName = hit.collider.name;
 
                 UmbrellaWaterTarget waterTarget = hit.collider.GetComponentInParent<UmbrellaWaterTarget>();
-                if (waterTarget != null)
+                WaterBasinTarget basinTarget = hit.collider.GetComponentInParent<WaterBasinTarget>();
+                if (basinTarget != null)
+                {
+                    lastPourTargetName = basinTarget.name;
+                    basinTarget.AddWater(pourAmount);
+                }
+                else if (waterTarget != null)
                 {
                     lastPourTargetName = waterTarget.name;
                     waterTarget.ReceiveWater(pourAmount);
